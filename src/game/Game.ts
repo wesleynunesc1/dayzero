@@ -9,6 +9,8 @@ import { findInteractable, interact, Interactable } from '../systems/Interaction
 import { doPlayerItemAction, takeAll } from '../systems/ItemActions';
 import { respawnPlayer } from '../systems/Respawn';
 import { Simulation } from '../systems/Simulation';
+import { applySave, loadFromStorage, saveToStorage, serializeWorld, SaveData, auditUids } from '../systems/Save';
+import { WeatherKind } from '../systems/Weather';
 import { UI, UIHost } from '../ui/UI';
 import { EMPTY_COMMAND, PlayerCommand, World } from '../world/World';
 
@@ -42,6 +44,8 @@ export class Game implements UIHost {
   testCommand: Partial<PlayerCommand> | null = null;
   timeScale = 1;
   showStats = false;
+  private autosaveT = 0;
+  private saveRequestT = -1;
 
   constructor(root: HTMLElement) {
     this.canvas = document.createElement('canvas');
@@ -53,7 +57,7 @@ export class Game implements UIHost {
     this.newWorld(CONFIG.seed + 7);
     this.state = 'title';
     this.canvas.classList.add('menu');
-    this.ui.showTitle(true);
+    this.ui.showTitle(true, this.saveInfo());
     window.addEventListener('resize', () => {
       this.renderer.resize();
       this.camera.viewW = this.renderer.viewW;
@@ -87,6 +91,59 @@ export class Game implements UIHost {
     this.world.events.on('playerDied', () => {
       this.deathTimer = 1.8;
     });
+    this.world.events.on('requestSave', () => {
+      if (this.saveRequestT < 0) this.saveRequestT = 1;
+    });
+  }
+
+  private saveInfo(): string | null {
+    const d = loadFromStorage();
+    if (!d) return null;
+    const mins = 6 * 60 + d.world.time;
+    const day = Math.floor(mins / 1440) + 1;
+    const m = Math.floor(mins % 1440);
+    const when = new Date(d.savedAt).toLocaleString('pt-BR', { dateStyle: 'short', timeStyle: 'short' });
+    return `Salvamento: dia ${day}, ${String(Math.floor(m / 60)).padStart(2, '0')}:${String(m % 60).padStart(2, '0')} no jogo · salvo em ${when}`;
+  }
+
+  hasSave(): boolean {
+    return !!loadFromStorage();
+  }
+
+  saveGame(auto = false): boolean {
+    if (this.state === 'title' || !this.world.player.alive) return false;
+    const ok = saveToStorage(this.world);
+    if (ok) {
+      this.world.events.emit('saved', { auto });
+      if (!auto) this.world.msg('Partida salva.', 'good');
+    } else if (!auto) this.world.msg('Não foi possível salvar (armazenamento do navegador indisponível).', 'warn');
+    return ok;
+  }
+
+  /** Carrega um save (ou o do armazenamento local). */
+  continueGame(data?: SaveData) {
+    const d = data ?? loadFromStorage();
+    if (!d) return;
+    this.audio.init();
+    this.newWorld(d.seed);
+    try {
+      applySave(this.world, d);
+    } catch (e) {
+      console.error(e);
+      this.world.msg(`Falha ao carregar o salvamento: ${(e as Error).message}`, 'danger');
+    }
+    this.renderer.setWorld(this.world);
+    this.camera.follow(this.world.player.x, this.world.player.y, 0, true);
+    this.state = this.world.player.alive ? 'playing' : 'dead';
+    this.canvas.classList.toggle('menu', this.state !== 'playing');
+    this.ui.showTitle(false);
+    this.ui.showPause(false);
+    this.ui.showDeath(null);
+    this.world.msg(`Partida carregada — ${this.world.clockText()}.`, 'good');
+  }
+
+  loadGame() {
+    if (this.hasSave()) this.continueGame();
   }
 
   // ------------------------------------------------------------------ UIHost
@@ -96,6 +153,7 @@ export class Game implements UIHost {
     this.state = 'playing';
     this.canvas.classList.remove('menu');
     this.ui.showTitle(false);
+    this.autosaveT = 0;
     this.world.msg('Você está no abrigo (Casa 1). Elias está com você. Procure suprimentos — e evite fazer barulho.', 'info');
     this.world.msg('Dica: [E] interage, [I] abre o inventário, [Esc] mostra os controles.', 'info');
   }
@@ -117,6 +175,7 @@ export class Game implements UIHost {
   respawn() {
     respawnPlayer(this.world);
     this.ui.showDeath(null);
+    this.saveGame(true);
     this.state = 'playing';
     this.canvas.classList.remove('menu');
     this.camera.follow(this.world.player.x, this.world.player.y, 0, true);
@@ -182,6 +241,7 @@ export class Game implements UIHost {
     }
     if (inp.consume('inventory')) this.ui.toggleInventory();
     if (inp.consume('health')) this.ui.toggleInventory('condicao');
+    if (inp.consume('craft')) this.ui.toggleInventory('fabricar');
     if (inp.consume('map')) this.ui.toggleMap();
   }
 
@@ -225,6 +285,18 @@ export class Game implements UIHost {
     this.stepsThisFrame = 0;
     if (this.state === 'paused') return;
 
+    // dormindo: o tempo do mundo corre acelerado (simulação real, passo a passo)
+    if (this.state === 'playing' && w.player.sleep && this.timeScale > 0) {
+      const wake = this.input.consume('interact');
+      for (let i = 0; i < CONFIG.time.sleepStepsPerFrame && w.player.sleep; i++) {
+        this.sim.step(STEP, { ...EMPTY_COMMAND, aimX: w.player.aimX, aimY: w.player.aimY, interact: wake && i === 0 });
+      }
+      this.acc = 0;
+      this.stepsThisFrame = 1;
+      this.camera.follow(w.player.x, w.player.y, dt);
+      this.audio.setRain(w.weather.rain);
+      return;
+    }
     this.acc += dt * this.timeScale;
     let first = true;
     let steps = 0;
@@ -248,16 +320,38 @@ export class Game implements UIHost {
     if (steps >= 8) this.acc = 0;
     this.stepsThisFrame = steps;
 
-    // câmera: segue o jogador com leve antecipação da mira
+    // câmera: segue o jogador com leve antecipação da mira (ou da direção do veículo)
     const p = w.player;
-    const lookX = clamp((p.aimX - p.x) * 0.18, -50, 50);
-    const lookY = clamp((p.aimY - p.y) * 0.18, -36, 36);
-    this.camera.follow(p.x + (p.alive ? lookX : 0), p.y + (p.alive ? lookY : 0), dt);
+    const veh = w.vehicleById(p.vehicleId);
+    if (veh) {
+      const ahead = clamp(veh.speed * 0.45, -40, 70);
+      this.camera.follow(veh.x + Math.cos(veh.angle) * ahead, veh.y + Math.sin(veh.angle) * ahead, dt);
+    } else {
+      const lookX = clamp((p.aimX - p.x) * 0.18, -50, 50);
+      const lookY = clamp((p.aimY - p.y) * 0.18, -36, 36);
+      this.camera.follow(p.x + (p.alive ? lookX : 0), p.y + (p.alive ? lookY : 0), dt);
+    }
 
     this.target = this.state === 'playing' && p.alive ? findInteractable(w) : null;
 
     // áudio contínuo
     this.audio.setRadio(p.alive && p.inv.items.some((i) => i.defId === 'radio' && i.state?.on));
+    const ev = w.vehicles.find((v) => v.engineOn && Math.hypot(v.x - p.x, v.y - p.y) < 400);
+    this.audio.setEngine(!!ev, ev ? Math.min(1, Math.abs(ev.throttle) * 0.6 + Math.abs(ev.speed) / 200) : 0);
+    this.audio.setRain(w.weather.rain);
+
+    // salvamento automático periódico e após ações importantes
+    if (this.state === 'playing' && p.alive) {
+      this.autosaveT += dt;
+      if (this.autosaveT >= CONFIG.save.autosaveSeconds) {
+        this.autosaveT = 0;
+        this.saveGame(true);
+      }
+      if (this.saveRequestT >= 0) {
+        this.saveRequestT -= dt;
+        if (this.saveRequestT < 0) this.saveGame(true);
+      }
+    }
     if (p.alive) this.audio.updateHeart(dt, p.health.hp / p.health.max);
 
     if (this.deathTimer > 0) {
@@ -311,6 +405,20 @@ export class Game implements UIHost {
         }
       },
       target: () => findInteractable(g.world),
+      setWeather(kind: WeatherKind) {
+        g.world.weather.set(kind, 99, true);
+        g.world.weather.locked = true;
+      },
+      /** Avança o relógio do mundo (simulação completa). */
+      advanceHours(h: number) {
+        const n = Math.round((h * 3600) / CONFIG.time.minutesPerSecond / 60 / STEP);
+        const w = g.world;
+        for (let i = 0; i < n; i++) g.sim.step(STEP, { ...EMPTY_COMMAND, aimX: w.player.aimX, aimY: w.player.aimY });
+      },
+      serialize: () => serializeWorld(g.world),
+      audit: () => auditUids(serializeWorld(g.world)),
+      save: () => g.saveGame(),
+      load: (d?: SaveData) => g.continueGame(d),
       /** Interage com o alvo atual (como apertar E). */
       interact() {
         const t = findInteractable(g.world);

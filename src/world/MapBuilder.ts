@@ -14,6 +14,7 @@ import {
   Prop,
   SafePoint,
   Tree,
+  WaterSource,
   ZombieSpawn,
 } from './types';
 
@@ -35,6 +36,8 @@ export interface BuiltWorld {
   zombies: ZombieSpawn[];
   playerStart: { x: number; y: number };
   allyStart: { x: number; y: number };
+  waterSources: WaterSource[];
+  vehicles: { def: string; x: number; y: number; angle: number; fuel: number }[];
 }
 
 /**
@@ -55,7 +58,13 @@ export function buildNeighborhood(seed: number): BuiltWorld {
   const safePoints: SafePoint[] = [];
   const labels: MapLabel[] = [];
   const zombies: ZombieSpawn[] = [];
+  const waterSources: WaterSource[] = [];
+  const vehicles: BuiltWorld['vehicles'] = [];
   let cid = 0;
+  const waterSource = (name: string, kind: string, x: number, y: number, w: number, h: number, liters: number, capacity: number, collectsRain: boolean, desc: string) => {
+    waterSources.push({ id: `agua${waterSources.length}`, name, x, y, w, h, liters, capacity, collectsRain });
+    prop(kind, x, y, w, h, { name, desc });
+  };
 
   // ---------------------------------------------------------------- helpers
   const fill = (x0: number, y0: number, x1: number, y1: number, t: TileId) => {
@@ -191,13 +200,15 @@ export function buildNeighborhood(seed: number): BuiltWorld {
         ? 'Um ônibus atravessado na pista. Os vidros estão estilhaçados.'
         : 'Vidros quebrados, pneus murchos. Alguém saiu às pressas.';
     decals.push({ x: (x + w / 2) * TILE, y: (y + h / 2) * TILE, kind: 'oil', r: 10, rot: rng.range(0, 6), seed: rng.int(0, 9999) });
+    // veículos abandonados não queimados podem ter gasolina no tanque (retirável com mangueira)
+    const fuel = o.burned || kind === 'bus' ? 0 : rng.chance(0.6) ? Math.round(rng.range(2, 7) * 10) / 10 : 0;
     if (o.trunk) {
       const c = container('porta_malas', x, y, w, h, kind, { name: 'Porta-malas', color });
       const p = props[props.length - 1];
-      Object.assign(p, { vertical, burned: !!o.burned, color, desc, name: `${name} (porta-malas)` });
+      Object.assign(p, { vertical, burned: !!o.burned, color, desc, name: `${name} (porta-malas)`, fuel });
       return c;
     }
-    prop(kind, x, y, w, h, { vertical, burned: !!o.burned, color, name, desc });
+    prop(kind, x, y, w, h, { vertical, burned: !!o.burned, color, name, desc, fuel });
     return null;
   };
 
@@ -271,6 +282,9 @@ export function buildNeighborhood(seed: number): BuiltWorld {
     prop('bed', 19, 23, 2, 2, { name: 'Cama' });
     container('guarda_roupa', 16, 20, 2, 1, 'wardrobe', { loot: false, items: [createItem('taco_beisebol', 1, 0.9), createItem('moletom'), createItem('camiseta')] });
     container('comoda', 20, 20, 1, 1, 'dresser', { loot: false, items: [createItem('bandagem', 1), createItem('fotografia')] });
+    // abrigo: baú para guardar suprimentos (armazenamento persistente)
+    container('bau', 12, 15, 2, 1, 'chest', { loot: false });
+    waterSource('Barril de chuva', 'rain_barrel', 6, 26, 1, 1, 6, 60, true, 'Barril que recolhe água da chuva. Água não tratada: ferva antes de beber.');
     // quintal
     tree(6, 12);
     tree(23, 30);
@@ -365,6 +379,7 @@ export function buildNeighborhood(seed: number): BuiltWorld {
     tree(6, 57);
     tree(22, 74);
     tree(7, 74);
+    waterSource("Caixa d'água", 'water_tank', 19, 73, 2, 2, 120, 500, true, "Caixa d'água da casa. Ainda tem água parada — não tratada."); 
     safePoints.push({ id: 'sp_casa3', name: 'Casa 3', x: 11.5 * TILE, y: 64.5 * TILE, building: b, discovered: false, lastVisit: 0 });
     zombies.push({ x: 10.5, y: 66.5, type: 'debilitado', outfit: 'casual' });
   }
@@ -402,6 +417,9 @@ export function buildNeighborhood(seed: number): BuiltWorld {
     container('mesa', 42, 68, 2, 1, 'desk', { name: 'Escrivaninha', loot: false, items: [createItem('fragmento_mapa'), createItem('caderno')] });
     container('armario_arquivo', 44, 71, 1, 2, 'filing');
     container('estante', 39, 72, 2, 1, 'shelf_home');
+    const rifle = createItem('rifle', 1, 0.85);
+    rifle.state = { ammo: 2 };
+    container('armario_armas', 39, 67, 1, 1, 'gun_cab', { name: 'Armário do caçador', loot: false, items: [rifle, createItem('municao_308', 6)] });
     decal(40 * TILE, 63 * TILE, 'blood', 8);
     tree(30, 56);
     tree(47, 76);
@@ -434,11 +452,13 @@ export function buildNeighborhood(seed: number): BuiltWorld {
     container('prateleira_mercado', 82, 28, 4, 1, 'gondola', { name: 'Prateleira de higiene', items: [createItem('sabonete', 2)] });
     container('prateleira_mercado', 75, 24, 1, 4, 'gondola_v', { name: 'Prateleira lateral' });
     container('refrigerador', 94, 24, 1, 5, 'fridge_v', { items: [createItem('agua'), createItem('agua')] });
+    container('hortifruti', 87, 25, 4, 1, 'produce', { name: 'Banca de hortifrúti' });
+    container('acougue', 75, 30, 1, 2, 'freezer', { name: 'Freezer do açougue (desligado)' });
     prop('counter', 88, 30, 2, 1, { name: 'Balcão do caixa' });
     container('caixa_registradora', 90, 30, 1, 1, 'register', { items: [createItem('pilhas', 2)] });
     prop('cart', 92, 31, 1, 1, { name: 'Carrinho de compras', desc: 'Um carrinho com uma roda torta.' });
     container('estoque', 76, 17, 4, 1, 'rack', { items: [createItem('feijao_lata', 2)] });
-    container('estoque', 83, 17, 4, 1, 'rack');
+    container('estoque', 83, 17, 4, 1, 'rack', { items: [createItem('galao_agua')] });
     container('caixote', 92, 19, 2, 2, 'crate', { name: 'Caixotes' });
     prop('pallet', 86, 20, 2, 1, { solid: false });
     decal(86 * TILE, 31 * TILE, 'blood', 11);
@@ -477,15 +497,19 @@ export function buildNeighborhood(seed: number): BuiltWorld {
     win(119, 6);
     container('estante_ferramentas', 105, 8, 1, 4, 'rack_v');
     container('estante_ferramentas', 105, 14, 1, 4, 'rack_v');
-    container('bancada', 108, 7, 4, 1, 'workbench', { items: [createItem('pe_de_cabra', 1, 0.8)] });
+    container('bancada', 108, 7, 4, 1, 'workbench', { items: [createItem('pe_de_cabra', 1, 0.8), createItem('mangueira'), createItem('martelo', 1, 0.9), createItem('pregos', 24)] });
     container('caixa_ferramentas', 113, 7, 1, 1, 'toolbox');
     container('caixote', 108, 15, 2, 2, 'crate', { name: 'Caixotes' });
-    container('caixote', 114, 17, 2, 2, 'crate', { name: 'Caixotes' });
+    const gas = createItem('galao_gasolina');
+    gas.state = { fuel: 6 };
+    container('caixote', 114, 17, 2, 2, 'crate', { name: 'Caixotes', items: [gas, createItem('tabua', 3)] });
     prop('pallet', 110, 11, 2, 2, { solid: false });
     container('mesa', 118, 8, 2, 1, 'desk', { name: 'Mesa do escritório', items: [createItem('lanterna')] });
     container('armario_arquivo', 120, 10, 1, 2, 'filing');
     decal(112 * TILE, 18 * TILE, 'oil', 12);
     car(106, 26, false, { kind: 'van', trunk: true, color: '#7a7d78' });
+    // caminhonete dirigível, com pouco combustível no tanque
+    vehicles.push({ def: 'caminhonete', x: 112.5 * TILE, y: 31 * TILE, angle: Math.PI / 2, fuel: 1.5 });
     zombies.push({ x: 110.5, y: 13.5, type: 'comum', outfit: 'operario' });
     zombies.push({ x: 117.5, y: 18.5, type: 'comum', outfit: 'operario' });
     labels.push({ text: 'Depósito', x: 112, y: 13 });
@@ -732,5 +756,7 @@ export function buildNeighborhood(seed: number): BuiltWorld {
     zombies,
     playerStart: { x: 11.5 * TILE, y: 21.5 * TILE },
     allyStart: { x: 13 * TILE, y: 17.5 * TILE },
+    waterSources,
+    vehicles,
   };
 }

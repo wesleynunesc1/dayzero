@@ -18,6 +18,7 @@ export type Action =
   | 'attack'
   | 'aim'
   | 'health'
+  | 'craft'
   | 'opt1'
   | 'opt2'
   | 'opt3'
@@ -41,6 +42,7 @@ const KEYMAP: Record<string, Action> = {
   KeyR: 'reload',
   Escape: 'pause',
   KeyH: 'health',
+  KeyF: 'craft',
   Digit1: 'opt1',
   Digit2: 'opt2',
   Digit3: 'opt3',

@@ -2,6 +2,7 @@ import { TILE } from '../config';
 import { hash2, RNG } from '../engine/math';
 import { Appearance } from '../entities/Actor';
 import { Door } from '../world/TileMap';
+import type { Vehicle } from '../entities/Vehicle';
 import { Building, Prop, Tree } from '../world/types';
 import { Ctx, ellipse, hex, makeCanvas, rgb, roundRect, shade, shadeHex } from './canvas';
 
@@ -326,6 +327,110 @@ export function drawDoor(ctx: Ctx, d: Door) {
     ctx.fillRect(TILE - 4, 0.5, 1.5, 1);
   }
   ctx.restore();
+  if (d.barricades > 0) {
+    // tábuas pregadas por cima da porta
+    ctx.save();
+    ctx.translate(x + 8, y + 8);
+    if (d.vertical) ctx.rotate(Math.PI / 2);
+    for (let i = 0; i < d.barricades * 2; i++) {
+      ctx.save();
+      ctx.rotate(i % 2 ? -0.35 : 0.35);
+      ctx.fillStyle = 'rgba(0,0,0,0.35)';
+      ctx.fillRect(-10, -2 + (i - 1) * 2.5 + 1, 20, 3.2);
+      ctx.fillStyle = i % 2 ? '#7a6040' : '#86694a';
+      ctx.fillRect(-10, -2 + (i - 1) * 2.5, 20, 3.2);
+      ctx.fillStyle = '#4a3a26';
+      ctx.fillRect(-8, -1 + (i - 1) * 2.5, 1, 1);
+      ctx.fillRect(7, -1 + (i - 1) * 2.5, 1, 1);
+      ctx.restore();
+    }
+    ctx.restore();
+  }
+}
+
+// ===================================================================== veículo dirigível
+/** Caminhonete vista de cima (cabine + caçamba). */
+export function drawVehicle(ctx: Ctx, v: Vehicle, night: number) {
+  const L = v.def.length;
+  const W = v.def.width;
+  ctx.save();
+  ctx.translate(v.x, v.y);
+  ctx.rotate(v.angle);
+  ctx.fillStyle = 'rgba(0,0,0,0.35)';
+  roundRect(ctx, -L / 2 + 3, -W / 2 + 3, L, W, 5);
+  ctx.fill();
+  // rodas
+  ctx.fillStyle = '#161617';
+  for (const wx of [-L * 0.3, L * 0.28]) {
+    const st = wx > 0 ? v.steer * 0.35 : 0;
+    for (const sy of [-1, 1]) {
+      ctx.save();
+      ctx.translate(wx, sy * (W / 2 - 1));
+      ctx.rotate(st);
+      ctx.fillRect(-4.5, -2, 9, 4);
+      ctx.restore();
+    }
+  }
+  const body = v.hp <= 0 ? '#3a3632' : v.def.color;
+  ctx.fillStyle = body;
+  roundRect(ctx, -L / 2, -W / 2 + 2, L, W - 4, 5);
+  ctx.fill();
+  // caçamba (traseira)
+  ctx.fillStyle = shadeHex(body, -0.35);
+  ctx.fillRect(-L / 2 + 3, -W / 2 + 5, L * 0.42, W - 10);
+  ctx.strokeStyle = shadeHex(body, -0.5);
+  ctx.lineWidth = 0.8;
+  for (let i = 1; i < 4; i++) {
+    const yy = -W / 2 + 5 + ((W - 10) * i) / 4;
+    ctx.beginPath();
+    ctx.moveTo(-L / 2 + 4, yy);
+    ctx.lineTo(-L / 2 + 3 + L * 0.42, yy);
+    ctx.stroke();
+  }
+  // cabine
+  ctx.fillStyle = shadeHex(body, 0.08);
+  roundRect(ctx, -L * 0.05, -W / 2 + 3.5, L * 0.32, W - 7, 3);
+  ctx.fill();
+  ctx.fillStyle = '#34444c';
+  ctx.fillRect(L * 0.24, -W / 2 + 5, 4, W - 10);
+  ctx.fillRect(-L * 0.05 - 1, -W / 2 + 5.5, 2.5, W - 11);
+  // capô e faróis
+  ctx.fillStyle = shadeHex(body, -0.08);
+  ctx.fillRect(L * 0.3, -W / 2 + 4, L * 0.17, W - 8);
+  ctx.fillStyle = v.engineOn ? 'rgba(255,240,190,1)' : '#c8c0a0';
+  ctx.fillRect(L / 2 - 2, -W / 2 + 4, 1.8, 3);
+  ctx.fillRect(L / 2 - 2, W / 2 - 7, 1.8, 3);
+  ctx.fillStyle = v.engineOn && v.throttle < 0 ? '#e04030' : '#6a2a24';
+  ctx.fillRect(-L / 2, -W / 2 + 4, 1.5, 3);
+  ctx.fillRect(-L / 2, W / 2 - 7, 1.5, 3);
+  // ferrugem
+  const r = new RNG(7);
+  for (let i = 0; i < 7; i++) {
+    ctx.fillStyle = 'rgba(110,70,40,0.55)';
+    ctx.fillRect(r.range(-L / 2 + 2, L / 2 - 4), r.range(-W / 2 + 3, W / 2 - 5), r.range(1, 3), 1);
+  }
+  if (v.engineOn) {
+    // vibração/fumaça do escapamento
+    ctx.fillStyle = 'rgba(120,120,120,0.25)';
+    ellipse(ctx, -L / 2 - 3 - Math.random() * 3, W / 2 - 6, 2.5, 2);
+  }
+  ctx.restore();
+  if (v.engineOn && night > 0.2) {
+    ctx.save();
+    ctx.globalCompositeOperation = 'lighter';
+    const hx = v.x + Math.cos(v.angle) * (L / 2);
+    const hy = v.y + Math.sin(v.angle) * (L / 2);
+    const g = ctx.createRadialGradient(hx, hy, 0, hx, hy, 120);
+    g.addColorStop(0, `rgba(255,236,190,${0.25 * night})`);
+    g.addColorStop(1, 'rgba(255,236,190,0)');
+    ctx.fillStyle = g;
+    ctx.beginPath();
+    ctx.moveTo(hx, hy);
+    ctx.arc(hx, hy, 120, v.angle - 0.4, v.angle + 0.4);
+    ctx.closePath();
+    ctx.fill();
+    ctx.restore();
+  }
 }
 
 // ===================================================================== telhados
@@ -859,6 +964,58 @@ export function drawProp(ctx: Ctx, p: Prop) {
       ctx.fill();
       ctx.fillStyle = '#8f8c80';
       ctx.fillRect(x + 6, y - 5, 4, 1.5);
+      break;
+    }
+    case 'chest': {
+      shadowRect(ctx, x + 1, y + 2, w - 2, h - 4, 1);
+      box(ctx, x + 1, y + 2, w - 2, h - 4, '#6a4e34', 1);
+      ctx.fillStyle = '#3e3a36';
+      ctx.fillRect(x + 6, y + 2, 2, h - 4);
+      ctx.fillRect(x + w - 8, y + 2, 2, h - 4);
+      ctx.fillStyle = '#b8a77a';
+      ctx.fillRect(x + w / 2 - 1, y + h / 2 - 1, 2, 3);
+      break;
+    }
+    case 'rain_barrel': {
+      ctx.fillStyle = 'rgba(0,0,0,0.3)';
+      ellipse(ctx, x + 9, y + 9.5, 6.5, 5.5);
+      ctx.fillStyle = '#3e5a6e';
+      ellipse(ctx, x + 8, y + 8, 6, 6);
+      ctx.fillStyle = '#2a3e4c';
+      ellipse(ctx, x + 8, y + 8, 4.5, 4.5);
+      ctx.fillStyle = 'rgba(120,150,165,0.7)';
+      ellipse(ctx, x + 7, y + 7, 2, 1.5);
+      break;
+    }
+    case 'water_tank': {
+      ctx.fillStyle = 'rgba(0,0,0,0.3)';
+      ellipse(ctx, x + w / 2 + 2, y + h / 2 + 3, w / 2, h / 2 - 1);
+      ctx.fillStyle = '#3d5d78';
+      ellipse(ctx, x + w / 2, y + h / 2, w / 2 - 1, h / 2 - 1);
+      ctx.fillStyle = '#4a6e8c';
+      ellipse(ctx, x + w / 2, y + h / 2, w / 2 - 5, h / 2 - 5);
+      ctx.fillStyle = '#2e4658';
+      ellipse(ctx, x + w / 2, y + h / 2, 4, 4);
+      break;
+    }
+    case 'produce': {
+      shadowRect(ctx, x, y + 2, w, h - 4, 1);
+      box(ctx, x, y + 2, w, h - 4, '#6d5a3d', 1);
+      for (let i = 0; i < p.w; i++)
+        for (let k = 0; k < 6; k++) {
+          if (r.chance(0.3)) continue;
+          ctx.fillStyle = r.pick(['#8a3a2e', '#a08a3a', '#6a7a3a', '#9a5a2a']);
+          ellipse(ctx, x + i * TILE + 3 + (k % 3) * 4.5, y + 6 + Math.floor(k / 3) * 4, 1.8, 1.8);
+        }
+      break;
+    }
+    case 'freezer': {
+      shadowRect(ctx, x + 1, y, w - 2, h, 1);
+      box(ctx, x + 1, y, w - 2, h - 1, '#b8b6ae', 1);
+      ctx.fillStyle = '#8f8d86';
+      ctx.fillRect(x + 2, y + h / 2 - 0.5, w - 4, 1);
+      ctx.fillStyle = 'rgba(70,40,30,0.35)';
+      ctx.fillRect(x + 3, y + h - 6, w - 6, 3);
       break;
     }
     case 'car':

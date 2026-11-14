@@ -17,6 +17,23 @@ export interface Prop {
   containerId?: string;
   name?: string;
   desc?: string;
+  /** Combustível restante no tanque (veículos abandonados; retirável com mangueira). */
+  fuel?: number;
+}
+
+/** Fonte de água do ambiente (barril de chuva, caixa d'água). Água NÃO tratada. */
+export interface WaterSource {
+  id: string;
+  name: string;
+  x: number;
+  y: number;
+  w: number;
+  h: number;
+  /** Litros atuais e capacidade. */
+  liters: number;
+  capacity: number;
+  /** Recolhe água da chuva. */
+  collectsRain: boolean;
 }
 
 /** Recipiente com itens. Pode estar ligado a um móvel (tiles) ou a um corpo (pixels). */

@@ -19,6 +19,9 @@ html,body{margin:0;height:100%;background:#0b0c0c;overflow:hidden;color:var(--in
 .bar{height:6px;background:rgba(255,255,255,0.07);border-radius:1px;overflow:hidden}
 .bar>i{display:block;height:100%;background:var(--ink-dim);transition:width .15s linear}
 .bar.hp>i{background:#9a4a3c}.bar.st>i{background:#8a8a72}.bar.w>i{background:#7f8a7a}
+.bar.food>i{background:#9a7a44}.bar.water>i{background:#56788c}.bar.en>i{background:#7a6f94}.bar.fuel>i{background:#a0603a}
+.tabs{display:flex;gap:4px;flex-wrap:wrap}.tabs .btn{padding:4px 9px;font-size:12px}.tabs .btn.on{border-color:rgba(201,162,91,.6);color:#efdcb2}
+#sleep{position:absolute;left:50%;top:38%;transform:translate(-50%,-50%);padding:14px 22px;text-align:center;display:flex;flex-direction:column;gap:6px;font-size:15px}
 .bar.w.over>i{background:var(--red)}
 
 /* HUD */
@@ -45,7 +48,7 @@ html,body{margin:0;height:100%;background:#0b0c0c;overflow:hidden;color:var(--in
 #log div{padding:3px 9px;background:rgba(12,13,12,.62);border-left:2px solid var(--ink-faint);font-size:12.5px;line-height:1.35;transition:opacity .6s}
 #log .warn{border-color:var(--amber)} #log .danger{border-color:var(--red);color:#efc9c0}
 #log .good{border-color:var(--green)} #log .npc{border-color:var(--blue);color:#d3dde2}
-#stance{position:absolute;left:16px;bottom:150px;font-size:11px;color:var(--ink-dim);letter-spacing:.1em;text-transform:uppercase}
+#stance{position:absolute;left:16px;bottom:208px;font-size:11px;color:var(--ink-dim);letter-spacing:.1em;text-transform:uppercase}
 
 /* Modais */
 .modal{position:absolute;pointer-events:auto;background:var(--panel-solid);border:1px solid var(--line);border-radius:4px;box-shadow:0 18px 60px rgba(0,0,0,.6)}

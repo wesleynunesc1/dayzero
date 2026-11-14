@@ -38,7 +38,7 @@ export class NoiseSystem {
   ) {
     const w = this.world;
     w.events.emit('noise', { x: n.x, y: n.y, radius: n.radius, kind: n.kind, byPlayer: n.byPlayer });
-    if (n.radius >= 6 && n.byPlayer) w.noiseRing(n.x, n.y, n.radius);
+    if (n.radius >= 6 && n.byPlayer && n.kind !== 'motor' && n.kind !== 'radio') w.noiseRing(n.x, n.y, n.radius);
     const maxR = n.radius * 1.35; // margem para audição aguçada
     const reach = maxR * TILE;
     const near = listeners.filter((l) => Math.abs(l.x - n.x) <= reach && Math.abs(l.y - n.y) <= reach);

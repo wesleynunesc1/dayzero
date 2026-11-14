@@ -74,6 +74,56 @@ export class AudioSystem {
     }
   }
 
+  private engine: { osc: OscillatorNode; gain: GainNode; filter: BiquadFilterNode } | null = null;
+  private rainLoop: { gain: GainNode } | null = null;
+
+  /** Ronco contínuo do motor (rpm 0..1), 0 = desligado. */
+  setEngine(on: boolean, rpm: number) {
+    if (!this.ctx || !this.master) return;
+    if (on && !this.engine) {
+      const c = this.ctx;
+      const osc = c.createOscillator();
+      osc.type = 'sawtooth';
+      const filter = c.createBiquadFilter();
+      filter.type = 'lowpass';
+      filter.frequency.value = 400;
+      const gain = c.createGain();
+      gain.gain.value = 0;
+      osc.connect(filter).connect(gain).connect(this.master);
+      osc.start();
+      this.engine = { osc, gain, filter };
+    }
+    if (!this.engine) return;
+    const t = this.ctx.currentTime;
+    this.engine.osc.frequency.setTargetAtTime(38 + rpm * 70, t, 0.1);
+    this.engine.filter.frequency.setTargetAtTime(300 + rpm * 700, t, 0.1);
+    this.engine.gain.gain.setTargetAtTime(on ? 0.05 + rpm * 0.06 : 0, t, 0.15);
+    if (!on && this.engine.gain.gain.value < 0.003) {
+      this.engine.osc.stop();
+      this.engine = null;
+    }
+  }
+
+  /** Chiado da chuva (0..1). */
+  setRain(k: number) {
+    if (!this.ctx || !this.master || !this.noiseBuf) return;
+    if (k > 0.01 && !this.rainLoop) {
+      const c = this.ctx;
+      const src = c.createBufferSource();
+      src.buffer = this.noiseBuf;
+      src.loop = true;
+      const f = c.createBiquadFilter();
+      f.type = 'highpass';
+      f.frequency.value = 1200;
+      const g = c.createGain();
+      g.gain.value = 0;
+      src.connect(f).connect(g).connect(this.master);
+      src.start();
+      this.rainLoop = { gain: g };
+    }
+    if (this.rainLoop) this.rainLoop.gain.gain.setTargetAtTime(k * 0.07, this.ctx.currentTime, 0.5);
+  }
+
   setMuted(m: boolean) {
     this.enabled = !m;
     if (this.master) this.master.gain.value = m ? 0 : this.volume;
@@ -178,6 +228,13 @@ export class AudioSystem {
       case 'drink':
       case 'cloth':
         this.noise(0.25, vol * 0.2, name === 'drink' ? 700 : 1500, 'bandpass', pan);
+        break;
+      case 'engine_start':
+        this.noise(0.6, vol * 0.6, 300, 'lowpass', pan, 900);
+        this.tone(45, 0.7, vol * 0.5, 'sawtooth', pan, 70);
+        break;
+      case 'engine_stop':
+        this.tone(70, 0.6, vol * 0.4, 'sawtooth', pan, 30);
         break;
       case 'shout':
         this.tone(330, 0.5, vol * 0.25, 'sawtooth', pan, 260);

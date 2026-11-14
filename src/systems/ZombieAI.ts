@@ -5,7 +5,7 @@ import { Player } from '../entities/Player';
 import { Zombie } from '../entities/Zombie';
 import { T } from '../world/tiles';
 import type { World } from '../world/World';
-import { zombieStrike } from './Combat';
+import { breakWindow, zombieStrike } from './Combat';
 import type { NoiseEvent } from './Noise';
 
 /**
@@ -16,26 +16,40 @@ import type { NoiseEvent } from './Noise';
  */
 
 const AI = CONFIG.ai;
+let lastBreakMsg = -999;
 
-function zombieCost(world: World) {
+/** Custo de caminho. `aggressive`: atrás de alguém/um barulho, aceita forçar janelas e barricadas. */
+function zombieCost(world: World, aggressive: boolean) {
   const map = world.map;
   return (x: number, y: number) => {
     const d = map.doorAt(x, y);
-    if (d && !d.open && !d.broken) return 6; // pode arrombar
+    if (d && !d.open && !d.broken) return d.barricades > 0 ? 12 : 6; // pode arrombar
+    const t = map.get(x, y);
+    if (aggressive && (t === T.WINDOW || t === T.WINDOW_BOARDED)) return t === T.WINDOW ? 9 : 14;
     if (map.solid(x, y)) return Infinity;
-    if (map.get(x, y) === T.WINDOW_BROKEN) return 2.5;
+    if (t === T.WINDOW_BROKEN) return 2.5;
     return 1;
   };
 }
 
+/** Raio efetivo do alvo (quem está num veículo é alcançado pela lataria). */
+export function targetRadius(world: World, t: Actor): number {
+  if (t instanceof Player && t.vehicleId) {
+    const v = world.vehicleById(t.vehicleId);
+    if (v) return v.def.width / 2 + 3;
+  }
+  return t.radius;
+}
+
 function requestPath(world: World, z: Zombie, gx: number, gy: number): boolean {
   if (world.pathfinder.searchesThisTick >= AI.maxPathsPerTick) return false;
+  const aggressive = z.state === 'perseguir' || z.state === 'procurar' || z.state === 'investigar';
   const path = world.pathfinder.find(
     Math.floor(z.x / TILE),
     Math.floor(z.y / TILE),
     Math.floor(gx / TILE),
     Math.floor(gy / TILE),
-    zombieCost(world),
+    zombieCost(world, aggressive),
     2500,
   );
   z.path = path;
@@ -88,6 +102,13 @@ function followPath(world: World, z: Zombie, speed: number, dt: number): 'ok' | 
       return 'porta';
     }
   }
+  const wt = world.map.get(tx, ty);
+  if ((wt === T.WINDOW || wt === T.WINDOW_BOARDED) && dist(z.x, z.y, wp.x, wp.y) < 15) {
+    z.vx = z.vy = 0;
+    z.facing = approachAngle(z.facing, Math.atan2(wp.y - z.y, wp.x - z.x), 6 * dt);
+    bashWindow(world, z, tx, ty, dt);
+    return 'porta';
+  }
   if (dist(z.x, z.y, wp.x, wp.y) < 3.5) {
     z.pathIdx++;
     if (z.pathIdx >= path.length) return 'fim';
@@ -111,10 +132,43 @@ function bashDoor(world: World, z: Zombie, door: import('../world/TileMap').Door
   if (door.hp <= 0) {
     door.broken = true;
     door.open = true;
+    door.barricades = 0;
       world.burst(cx, cy, 'splinter', 14, '#6b5139', 50);
     world.addDecal({ x: cx, y: cy, kind: 'splinters', r: 8, rot: world.rng.range(0, 6), seed: world.rng.int(0, 9999) });
     world.sound('door_break', cx, cy, 1);
-    if (dist(cx, cy, world.player.x, world.player.y) < 22 * TILE) world.msg('Você ouve uma porta sendo arrombada.', 'danger');
+    if (dist(cx, cy, world.player.x, world.player.y) < 22 * TILE && world.time - lastBreakMsg > 15) {
+      lastBreakMsg = world.time;
+      world.msg('Você ouve uma porta sendo arrombada.', 'danger');
+    }
+  }
+}
+
+function bashWindow(world: World, z: Zombie, tx: number, ty: number, dt: number) {
+  z.bashT -= dt;
+  if (z.bashT > 0) return;
+  z.bashT = z.ztype === 'rapido' ? 0.8 : 1.15;
+  z.attackAnim = 0.3;
+  const map = world.map;
+  const idx = map.idx(tx, ty);
+  const t = map.get(tx, ty);
+  const hp = (world.windowHp.get(idx) ?? (t === T.WINDOW ? 12 : 90)) - (z.ztype === 'rapido' ? 9 : 7);
+  const cx = tx * TILE + TILE / 2;
+  const cy = ty * TILE + TILE / 2;
+  world.sound(t === T.WINDOW ? 'hit' : 'door_bash', cx, cy, 0.8);
+  world.makeNoise(cx, cy, CONFIG.noise.doorBash, 'pancadas', false, z.id);
+  if (hp > 0) {
+    world.windowHp.set(idx, hp);
+    return;
+  }
+  world.windowHp.delete(idx);
+  if (t === T.WINDOW) breakWindow(world, tx, ty, false);
+  else {
+    map.set(tx, ty, T.WINDOW_BROKEN);
+    world.boardedFrom.delete(idx);
+    world.burst(cx, cy, 'splinter', 12, '#6b5139', 50);
+    world.addDecal({ x: cx, y: cy, kind: 'splinters', r: 8, rot: world.rng.range(0, 6), seed: world.rng.int(0, 9999) });
+    world.sound('door_break', cx, cy, 1);
+    if (dist(cx, cy, world.player.x, world.player.y) < 22 * TILE) world.msg('Você ouve tábuas sendo arrancadas de uma janela.', 'danger');
   }
 }
 
@@ -138,8 +192,10 @@ function sense(world: World, z: Zombie, interval: number) {
   const hunting = z.state === 'perseguir' || z.state === 'atacar' || z.state === 'procurar' || z.state === 'identificar';
   for (const h of world.humans()) {
     const d = dist(z.x, z.y, h.x, h.y);
-    let range = AI.visionRange * z.stats.visionMul;
+    // clima (neblina/chuva) e escuridão reduzem a visão; a lanterna denuncia
     const p = h instanceof Player ? h : null;
+    const dark = world.nightFactor * (p?.flashlight ? 0 : 0.35);
+    let range = AI.visionRange * z.stats.visionMul * world.weather.visionMul * (1 - dark);
     if (p?.crouch) range *= 0.55;
     if (p?.running) range *= 1.15;
     if (p?.isDown) range *= 0.8;
@@ -348,7 +404,7 @@ export function updateZombie(world: World, z: Zombie, dt: number) {
         break;
       }
       const d = dist(z.x, z.y, t.x, t.y);
-      if (d <= z.radius + t.radius + S.reach && lostT < 0.5) {
+      if (d <= z.radius + targetRadius(world, t) + S.reach && lostT < 0.5) {
         z.setState('atacar');
         break;
       }
@@ -384,19 +440,20 @@ export function updateZombie(world: World, z: Zombie, dt: number) {
       }
       const d = dist(z.x, z.y, t.x, t.y);
       z.facing = approachAngle(z.facing, Math.atan2(t.y - z.y, t.x - z.x), 10 * dt);
-      if (d > z.radius + t.radius + S.reach + 5) {
+      const tr = targetRadius(world, t);
+      if (d > z.radius + tr + S.reach + 5) {
         z.setState('perseguir');
         break;
       }
       // mantém contato
-      if (d > z.radius + t.radius) steer(z, t.x, t.y, S.chase * 0.5 * slow, dt);
+      if (d > z.radius + tr) steer(z, t.x, t.y, S.chase * 0.5 * slow, dt);
       else z.vx = z.vy = 0;
       if (z.attackCd <= 0 && z.stagger <= 0) {
         z.attackWind += dt;
         if (z.attackWind >= S.windup) {
           z.attackWind = 0;
           z.attackCd = S.attackCd * world.rng.range(0.85, 1.15);
-          if (d <= z.radius + t.radius + S.reach + 3) zombieStrike(world, z, t);
+          if (d <= z.radius + tr + S.reach + 3) zombieStrike(world, z, t);
           else world.sound('swing', z.x, z.y, 0.5);
         }
       }

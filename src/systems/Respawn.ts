@@ -70,6 +70,10 @@ export function respawnPlayer(world: World): RespawnPoint {
   p.stamina = CONFIG.player.staminaMax;
   p.hunger = 25;
   p.thirst = 25;
+  p.fatigue = 20;
+  p.sickHours = 0;
+  p.sleep = null;
+  p.vehicleId = null;
   p.crouch = false;
   p.running = false;
   p.action = null;

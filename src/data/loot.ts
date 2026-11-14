@@ -18,6 +18,7 @@ export const CONTAINER_KINDS: Record<string, ContainerKind> = {
     table: [
       { id: 'feijao_lata', w: 4, qty: [1, 2] },
       { id: 'sardinha', w: 3 },
+      { id: 'carne_lata', w: 2 },
       { id: 'biscoito', w: 3 },
       { id: 'arroz', w: 3 },
       { id: 'macarrao_inst', w: 3, qty: [1, 3] },
@@ -36,6 +37,8 @@ export const CONTAINER_KINDS: Record<string, ContainerKind> = {
       { id: 'suco', w: 3 },
       { id: 'agua', w: 3 },
       { id: 'pao_forma', w: 2 },
+      { id: 'maca', w: 2 },
+      { id: 'carne_crua', w: 2 },
     ],
   },
   guarda_roupa: {
@@ -62,6 +65,7 @@ export const CONTAINER_KINDS: Record<string, ContainerKind> = {
       { id: 'pilhas', w: 2 },
       { id: 'analgesico', w: 2 },
       { id: 'bandagem', w: 2 },
+      { id: 'curativo', w: 2, qty: [1, 3] },
       { id: 'caderno', w: 1 },
     ],
   },
@@ -83,6 +87,8 @@ export const CONTAINER_KINDS: Record<string, ContainerKind> = {
     rolls: [0, 2],
     table: [
       { id: 'bandagem', w: 3, qty: [1, 2] },
+      { id: 'curativo', w: 3, qty: [2, 4] },
+      { id: 'antisseptico', w: 2 },
       { id: 'analgesico', w: 3 },
       { id: 'sabonete', w: 3 },
       { id: 'papel_higienico', w: 3 },
@@ -95,6 +101,7 @@ export const CONTAINER_KINDS: Record<string, ContainerKind> = {
     table: [
       { id: 'feijao_lata', w: 5, qty: [1, 3] },
       { id: 'sardinha', w: 4, qty: [1, 3] },
+      { id: 'carne_lata', w: 3, qty: [1, 2] },
       { id: 'biscoito', w: 4, qty: [1, 2] },
       { id: 'barra_cereal', w: 3, qty: [1, 4] },
       { id: 'chocolate', w: 2, qty: [1, 2] },
@@ -112,6 +119,7 @@ export const CONTAINER_KINDS: Record<string, ContainerKind> = {
     rolls: [2, 4],
     table: [
       { id: 'agua', w: 6 },
+      { id: 'galao_agua', w: 1 },
       { id: 'refrigerante', w: 4, qty: [1, 3] },
       { id: 'suco', w: 3, qty: [1, 2] },
     ],
@@ -249,6 +257,8 @@ export const CONTAINER_KINDS: Record<string, ContainerKind> = {
     rolls: [1, 2],
     table: [
       { id: 'bandagem', w: 4, qty: [1, 3] },
+      { id: 'curativo', w: 3, qty: [2, 5] },
+      { id: 'antisseptico', w: 2 },
       { id: 'analgesico', w: 2 },
     ],
   },
@@ -276,7 +286,33 @@ export const CONTAINER_KINDS: Record<string, ContainerKind> = {
       { id: 'cano_ferro', w: 1 },
     ],
   },
+  hortifruti: {
+    name: 'Banca de hortifrúti',
+    capacity: 30,
+    rolls: [2, 4],
+    table: [
+      { id: 'maca', w: 4 },
+      { id: 'banana', w: 4 },
+    ],
+  },
+  acougue: {
+    name: 'Freezer do açougue (desligado)',
+    capacity: 40,
+    rolls: [1, 3],
+    table: [{ id: 'carne_crua', w: 1 }],
+  },
+  bau: { name: 'Baú do abrigo', capacity: 80, rolls: [0, 0], table: [] },
   corpo: { name: 'Corpo', capacity: 999, rolls: [0, 0], table: [] },
+};
+
+/**
+ * Idade (horas de jogo antes do início) dos perecíveis em cada tipo de recipiente.
+ * Sem energia elétrica, geladeiras e freezers não conservam nada.
+ */
+export const PERISHABLE_AGE_HOURS: Record<string, [number, number]> = {
+  geladeira: [40, 90],
+  acougue: [30, 60],
+  hortifruti: [6, 40],
 };
 
 export function rollLoot(kind: string, rng: RNG): ItemInstance[] {
@@ -294,7 +330,15 @@ export function rollLoot(kind: string, rng: RNG): ItemInstance[] {
         const d = itemDef(e.id);
         const existing = out.find((o) => o.defId === e.id && (d.stack ?? 1) > 1);
         if (existing) existing.qty = Math.min(d.stack ?? 1, existing.qty + qty);
-        else out.push(createItem(e.id, Math.min(qty, d.stack ?? 1), rng.range(0.45, 1)));
+        else {
+          const it = createItem(e.id, Math.min(qty, d.stack ?? 1), rng.range(0.45, 1));
+          if (d.food?.perishable) {
+            const age = PERISHABLE_AGE_HOURS[kind] ?? [0, 12];
+            it.state = { ...it.state, born: -rng.range(age[0], age[1]) * 60 };
+          }
+          if (d.water) it.state = { uses: rng.int(1, d.water.capacity), contaminated: false };
+          out.push(it);
+        }
         break;
       }
     }

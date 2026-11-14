@@ -173,6 +173,14 @@ export function zombieStrike(world: World, z: Zombie, target: Actor) {
   if (target instanceof Player) {
     const p = target;
     if (p.dead) return;
+    // dentro do veículo: os golpes acertam a lataria, não o motorista
+    const v = world.vehicleById(p.vehicleId);
+    if (v) {
+      v.hp = Math.max(0, v.hp - 1.2);
+      world.sound('door_bash', v.x, v.y, 0.7);
+      if (rng.chance(0.15)) world.msg('Os infectados batem na lataria!', 'warn');
+      return;
+    }
     let hitChance = z.stats.hitChance;
     const sp = Math.hypot(p.vx, p.vy);
     if (!p.isDown && sp > 40) {
@@ -207,7 +215,7 @@ export function zombieStrike(world: World, z: Zombie, target: Actor) {
     const base = type === 'mordida' ? rng.range(14, 19) : type === 'laceracao' ? rng.range(11, 15) : rng.range(6, 9);
     const dmg = base * (1 - armor.armor * 0.5);
     p.health.damage(dmg);
-    const wound = p.health.addWound(type);
+    const wound = p.health.addWound(type, rng.next());
     if (type === 'arranhao' && rng.chance(0.45)) wound.bleed = 0;
     p.hurtFlash = 0.2;
     p.stagger = Math.max(p.stagger, 0.3);
@@ -220,7 +228,8 @@ export function zombieStrike(world: World, z: Zombie, target: Actor) {
     world.sound(type === 'mordida' ? 'bite' : 'hurt', p.x, p.y, 1);
     world.events.emit('playerHurt', { amount: dmg, kind: type });
     if (p.action) cancelAction(world, p);
-    if (type === 'mordida') world.msg('Você foi MORDIDO. A ferida queima como fogo.', 'danger');
+    if (p.health.infected) world.msg('Você foi mordido. O vírus foi transmitido — não há cura.', 'danger');
+    else if (type === 'mordida') world.msg('Uma mordida rasgou a pele, mas o vírus não foi transmitido. Trate o ferimento.', 'danger');
     else if (type === 'laceracao') world.msg(`${WOUND_LABEL[type]}! Você está sangrando.`, 'danger');
     else world.msg(wound.bleed > 0 ? 'Um infectado te arranhou. Está sangrando.' : 'Um infectado te arranhou de raspão.', 'warn');
     return;

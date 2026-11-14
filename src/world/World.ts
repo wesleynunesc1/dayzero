@@ -6,6 +6,8 @@ import { Actor, Appearance } from '../entities/Actor';
 import { Ally } from '../entities/Ally';
 import { Player } from '../entities/Player';
 import { Zombie, zombieLook } from '../entities/Zombie';
+import { Vehicle, VEHICLE_DEFS } from '../entities/Vehicle';
+import { WeatherController } from '../systems/Weather';
 import { Inventory } from '../systems/Inventory';
 import { WoundType } from '../systems/Health';
 import { buildNeighborhood } from './MapBuilder';
@@ -23,6 +25,7 @@ import {
   Prop,
   SafePoint,
   Tree,
+  WaterSource,
 } from './types';
 
 export type Tone = 'info' | 'warn' | 'danger' | 'good' | 'npc';
@@ -49,7 +52,9 @@ export type SoundName =
   | 'drink'
   | 'cloth'
   | 'shout'
-  | 'container';
+  | 'container'
+  | 'engine_start'
+  | 'engine_stop';
 
 export interface WorldEvents {
   message: { text: string; tone: Tone };
@@ -64,6 +69,14 @@ export interface WorldEvents {
   shot: { x: number; y: number };
   openMap: Record<string, never>;
   allyDialog: { allyId: string };
+  vehicleEnter: { id: string };
+  vehicleExit: { id: string };
+  sleepStart: Record<string, never>;
+  sleepEnd: { hours: number; reason: string };
+  weatherChanged: { kind: string };
+  saved: { auto: boolean };
+  /** Pede um salvamento (após fabricar, guardar no abrigo, dormir...). */
+  requestSave: Record<string, never>;
 }
 
 export interface Particle {
@@ -184,6 +197,15 @@ export class World {
   /** Novos decalques (sangue) a serem pintados no cenário pelo renderizador. */
   pendingDecals: Decal[] = [];
   playerStart: { x: number; y: number };
+  vehicles: Vehicle[] = [];
+  waterSources: WaterSource[];
+  weather: WeatherController;
+  /** Resistência restante de janelas de vidro/barricadas (índice do tile → pontos). */
+  windowHp = new Map<number, number>();
+  /** Tile original (vidro inteiro ou quebrado) de janelas que receberam tábuas. */
+  boardedFrom = new Map<number, number>();
+  /** Semente usada para construir o mapa (necessária para carregar o save). */
+  readonly seed: number;
   /** Estatísticas exibidas e úteis em testes. */
   stats = { zombiesKilled: 0, shotsFired: 0 };
   private corpseSeq = 0;
@@ -193,8 +215,12 @@ export class World {
   noiseHook: ((n: NoiseEvent) => void) | null = null;
 
   constructor(seed = CONFIG.seed) {
+    this.seed = seed;
     this.rng = new RNG(seed);
     const b = buildNeighborhood(seed);
+    this.waterSources = b.waterSources;
+    this.weather = new WeatherController(this.rng);
+    b.vehicles.forEach((v, i) => this.vehicles.push(new Vehicle(`v${i}`, VEHICLE_DEFS[v.def], v.x, v.y, v.angle, v.fuel)));
     this.map = b.map;
     this.props = b.props;
     this.containers = b.containers;
@@ -222,7 +248,37 @@ export class World {
   }
 
   makeNoise(x: number, y: number, radius: number, kind: string, byPlayer: boolean, sourceId: string | null = null) {
-    this.noiseHook?.({ x, y, radius, kind, byPlayer, sourceId });
+    // a chuva abafa os sons (exceto o próprio alerta entre zumbis próximos)
+    const r = kind === 'alerta' ? radius : radius * this.weather.noiseMul;
+    this.noiseHook?.({ x, y, radius: r, kind, byPlayer, sourceId });
+  }
+
+  // ------------------------------------------------------------- relógio do mundo
+  /** Minutos de jogo desde a meia-noite do dia 1. */
+  get gameMinutes() {
+    return CONFIG.time.startHour * 60 + this.time * CONFIG.time.minutesPerSecond;
+  }
+  get day() {
+    return Math.floor(this.gameMinutes / 1440) + 1;
+  }
+  get hour() {
+    return (this.gameMinutes % 1440) / 60;
+  }
+  clockText() {
+    const m = Math.floor(this.gameMinutes % 1440);
+    return `Dia ${this.day}, ${String(Math.floor(m / 60)).padStart(2, '0')}:${String(m % 60).padStart(2, '0')}`;
+  }
+  /** Escuridão natural (0 dia claro … 1 noite fechada), com amanhecer e anoitecer graduais. */
+  get nightFactor() {
+    const h = this.hour;
+    if (h >= 7 && h < 17.5) return 0;
+    if (h >= 17.5 && h < 19.5) return (h - 17.5) / 2;
+    if (h >= 4.5 && h < 7) return 1 - (h - 4.5) / 2.5;
+    return 1;
+  }
+
+  vehicleById(id: string | null) {
+    return id ? this.vehicles.find((v) => v.id === id) ?? null : null;
   }
 
   msg(text: string, tone: Tone = 'info') {

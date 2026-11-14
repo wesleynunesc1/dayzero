@@ -1,6 +1,8 @@
-# O Último Amanhecer — Etapa 01
+# O Último Amanhecer — Etapas 01 e 02
 
-Primeiro protótipo jogável 2D (top-down) de sobrevivência pós-apocalíptica.
+Protótipo jogável 2D (top-down) de sobrevivência pós-apocalíptica.
+A Etapa 02 adicionou fome, sede, energia e sono, caminhonete dirigível com gasolina, crafting,
+abrigo com barricadas, clima (chuva/neblina), dia e noite e salvamento local. Veja `ETAPA02.md`.
 Bairro explorável, infectados com IA, ruído com propagação física, combate, ferimentos,
 inventário com peso, NPC aliado, mapa de papel rasgado e morte com corpo saqueável.
 
@@ -46,6 +48,8 @@ Valide sempre em `localhost` antes de qualquer publicação.
 | H | Condição física e ferimentos |
 | M | Mapa (somente depois de encontrar um) |
 | R | Recarregar |
+| F | Fabricar (aba de crafting) |
+| Dirigindo: W / S / A / D | Acelerar · frear e ré · esterçar (E sai — pare antes) |
 | Mouse | Mirar · botão esquerdo ataca |
 | Botão direito | Mira firme (reduz a dispersão da pistola) |
 | Esc | Pausar / fechar janelas (o menu de pausa tem a regra de retorno) |
@@ -124,6 +128,13 @@ e a interação disponível.
 | Rádio | Mesa do despacho, delegacia |
 | Lanterna | Mesa do escritório do depósito · armário pessoal da delegacia |
 | Mochilas | Guarda-roupas das casas 2 e 4 |
+| Caminhonete (1,5 L no tanque) | Saída do depósito, no caminho de cascalho |
+| Galão de gasolina (6 L) + tábuas | Caixotes do depósito |
+| Mangueira de sifão, martelo, pregos | Bancada do depósito |
+| Rifle de caça .308 + munição | Armário do caçador, escritório da Casa 4 |
+| Água não tratada | Barril de chuva (quintal da Casa 1) · caixa d'água (fundos da Casa 3) |
+| Fogo para cozinhar/ferver | Tambores com fogo: calçada da Rua do Comércio e frente da delegacia |
+| Baú do abrigo | Sala da Casa 1 |
 
 ---
 
@@ -158,6 +169,16 @@ Decisões pensadas para as próximas etapas:
 - **IA com nível de detalhe**: zumbis distantes pensam menos e não calculam caminhos; buscas A*
   limitadas por quadro.
 
+### Onde ajustar o balanceamento (Etapa 02)
+
+- `src/config.ts`: relógio (`time`), fome/sede/fadiga (`needs`), ferimentos sujos (`wounds`),
+  transmissão do vírus por tipo de ferimento e atraso (`infection`), consumo e ruído do veículo
+  (`vehicle`), clima (`weather`), salvamento (`save`), carga base do jogador (`player.baseCarryKg`).
+- `src/data/items.ts`: peso, valores nutricionais, conservação, armas (dano, alcance, cadência,
+  munição, ruído), recipientes de água e de gasolina.
+- `src/data/recipes.ts`: receitas de fabricação. `src/data/loot.ts`: o que existe em cada recipiente.
+- `src/entities/Vehicle.ts`: modelos de veículo.
+
 ### Sobre o Phaser
 
 O briefing recomenda Phaser. Este protótipo foi construído num ambiente sem acesso à internet,
@@ -175,7 +196,9 @@ Os 18 testes obrigatórios do briefing foram executados no Chrome (com o jogo se
 por um roteiro automatizado, além de testes de simulação:
 
 ```bash
-node tests/e2e.mjs           # os 18 testes do briefing no navegador (requer playwright; ver topo do arquivo)
+npm test                     # lógica: 20 cenários da Etapa 02 + IA + itens + sanidade (sem navegador)
+npm run test:e2e             # navegador: 18 testes da Etapa 01 + roteiro da Etapa 02 (requer playwright)
+npx tsx tests/etapa2.test.ts # só os 20 cenários da Etapa 02
 npx tsx tests/ai.test.ts     # arrombamento de portas, NPC abrindo portas, som abafado, soak de 5 min
 npx tsx tests/items.test.ts  # rádio, lanterna, mochila, limite de peso, descarte, comida, tiras de pano
 npx tsx tests/sim.test.ts    # sanidade da simulação e reação ao disparo

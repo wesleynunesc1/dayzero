@@ -73,7 +73,7 @@ function cornerAssist(world: World, a: Actor, ix: number, iy: number) {
 /** Separação entre personagens (ninguém atravessa ninguém). */
 export function separate(world: World) {
   const all: Actor[] = [];
-  if (!world.player.dead) all.push(world.player);
+  if (!world.player.dead && !world.player.vehicleId) all.push(world.player);
   for (const a of world.allies) if (a.state !== 'morto') all.push(a);
   for (const z of world.zombies) all.push(z);
   world.hash.clear();

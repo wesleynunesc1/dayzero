@@ -15,6 +15,8 @@ export interface Door {
   /** 0 = fechada, 1 = aberta (animação). */
   anim: number;
   label: string;
+  /** Painéis de barricada pregados (0..2). Barricada impede abrir e soma resistência. */
+  barricades: number;
 }
 
 export const CHUNK = 32; // tiles por chunk de renderização
@@ -93,6 +95,7 @@ export class TileMap {
       building,
       anim: 0,
       label,
+      barricades: 0,
     };
     this.doors.push(door);
     this.doorIndex[this.idx(x, y)] = door.id;

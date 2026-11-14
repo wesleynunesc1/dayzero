@@ -29,6 +29,7 @@ export const T = {
   WALL_BLUE: 26,
   WALL_SAGE: 27,
   FLOOR_BATH: 28,
+  WINDOW_BOARDED: 29,
 } as const;
 
 export type TileId = number;
@@ -82,6 +83,7 @@ TILES[T.WALL_SAGE] = def('wall_sage', WALL);
 TILES[T.WALL_CONCRETE] = def('wall_concrete', WALL);
 TILES[T.WINDOW] = def('window', { solid: true, opaque: false, wall: true, sound: 2 });
 TILES[T.WINDOW_BROKEN] = def('window_broken', { solid: false, opaque: false, sound: 1, slow: 0.45, step: 'glass' });
+TILES[T.WINDOW_BOARDED] = def('window_boarded', { solid: true, opaque: true, wall: true, sound: 3 });
 TILES[T.FENCE_WOOD] = def('fence_wood', { solid: true, opaque: false, sound: 1.2, fence: true });
 TILES[T.FENCE_METAL] = def('fence_metal', { solid: true, opaque: false, sound: 1, fence: true });
 TILES[T.HEDGE] = def('hedge', { solid: true, opaque: true, sound: 1.6, fence: true, step: 'grass' });

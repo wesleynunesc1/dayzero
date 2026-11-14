@@ -1,5 +1,5 @@
 // Requer: npm i -D playwright && npx playwright install chromium
-// Uso: npm run dev (em outro terminal) e depois: URL=http://localhost:5173 node tests/e2e.mjs
+// Uso: npm run dev (em outro terminal) e depois: URL=http://localhost:5173 node tests/e2e-etapa1.mjs
 import { chromium } from 'playwright';
 const W = Number(process.env.VW || 1280), H = Number(process.env.VH || 720);
 const browser = await chromium.launch({ args: ['--autoplay-policy=no-user-gesture-required'] });

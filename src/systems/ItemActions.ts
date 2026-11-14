@@ -1,10 +1,11 @@
-import { createItem, itemDef, ItemInstance } from '../data/items';
+import { CONFIG, TILE } from '../config';
+import { createItem, freshness, itemDef, ItemInstance } from '../data/items';
 import { formatKg } from '../engine/math';
 import { EquipSlot, Player } from '../entities/Player';
-import { TILE } from '../config';
 import type { World } from '../world/World';
 import type { Container } from '../world/types';
-import { WOUND_LABEL } from './Health';
+import { WOUND_LABEL, WOUND_SEVERITY } from './Health';
+import { findEntrance, installBarricade, nearestSiphonCar, nearestVehicle } from './Interaction';
 import { Inventory } from './Inventory';
 
 export interface ItemAction {
@@ -15,24 +16,33 @@ export interface ItemAction {
   primary?: boolean;
 }
 
+type TreatKind = 'kit' | 'bandage' | 'improvised' | 'rag' | 'curativo' | 'antisseptico';
+
+const lit = (n: number) => n.toLocaleString('pt-BR', { maximumFractionDigits: 1 });
+
 /** Ações disponíveis para um item do inventário do jogador. */
 export function playerItemActions(world: World, it: ItemInstance): ItemAction[] {
   const p = world.player;
   const d = itemDef(it.defId);
   const out: ItemAction[] = [];
-  const busy = !!p.action || p.isDown;
+  const busy = !!p.action || p.isDown || !!p.sleep;
   const eq = p.isEquipped(it.uid);
 
-  if (d.food) {
+  if (d.water) {
+    const uses = it.state?.uses ?? 0;
+    out.push({ id: 'consume', label: 'Beber', enabled: uses > 0 && !busy, reason: uses > 0 ? undefined : 'Recipiente vazio.', primary: true });
+    if (uses > 0) out.push({ id: 'empty', label: 'Esvaziar', enabled: !busy });
+  } else if (d.food) {
     const edible = d.food.edible !== false;
-    out.push({ id: 'consume', label: d.food.verb, enabled: edible && !busy, reason: edible ? undefined : 'Precisa ser cozido.', primary: true });
+    out.push({ id: 'consume', label: d.food.verb, enabled: edible && !busy, reason: edible ? undefined : 'Precisa ser cozido no fogo (aba Fabricar).', primary: true });
   }
   if (d.medical) {
     if (d.medical.kind === 'painkiller') {
       out.push({ id: 'painkiller', label: 'Tomar', enabled: !busy, primary: true });
     } else {
-      const w = p.health.worstUntreated();
-      out.push({ id: 'treat', label: 'Tratar ferimento', enabled: !!w && !busy, reason: w ? undefined : 'Nenhum ferimento sem tratamento.', primary: true });
+      const kind = d.medical.kind as TreatKind;
+      const block = p.health.treatBlocker(kind);
+      out.push({ id: 'treat', label: kind === 'antisseptico' ? 'Limpar ferimento' : 'Tratar ferimento', enabled: !block && !busy, reason: block ?? undefined, primary: true });
     }
   }
   if (d.weapon) {
@@ -41,7 +51,8 @@ export function playerItemActions(world: World, it: ItemInstance): ItemAction[] 
     if (d.weapon.kind === 'gun') {
       const ammo = p.inv.count(d.weapon.ammo!);
       const full = (it.state?.ammo ?? 0) >= (d.weapon.magazine ?? 0);
-      out.push({ id: 'reload', label: 'Recarregar', enabled: !busy && ammo > 0 && !full, reason: ammo === 0 ? 'Sem munição no inventário.' : full ? 'Carregador cheio.' : undefined });
+      out.push({ id: 'reload', label: 'Recarregar', enabled: !busy && ammo > 0 && !full && eq === 'arma', reason: eq !== 'arma' ? 'Equipe a arma primeiro.' : ammo === 0 ? 'Sem munição compatível no inventário.' : full ? 'Carregador cheio.' : undefined });
+      if ((it.state?.ammo ?? 0) > 0) out.push({ id: 'unload', label: 'Descarregar', enabled: !busy });
     }
   }
   if (d.wear) {
@@ -59,6 +70,28 @@ export function playerItemActions(world: World, it: ItemInstance): ItemAction[] 
     out.push({ id: 'tune', label: 'Sintonizar', enabled: !!it.state?.on, reason: 'Rádio desligado.' });
     out.push({ id: 'batteries', label: 'Trocar pilhas', enabled: p.inv.count('pilhas') > 0 && !busy, reason: 'Sem pilhas.' });
   }
+  if (d.fuelCan) {
+    const fuel = it.state?.fuel ?? 0;
+    const v = nearestVehicle(world);
+    const car = nearestSiphonCar(world);
+    out.push({
+      id: 'refuel',
+      label: 'Abastecer veículo próximo',
+      enabled: !busy && fuel > 0 && !!v && v.fuel < v.def.fuelCapacity - 0.05,
+      reason: fuel <= 0 ? 'Galão vazio.' : !v ? 'Chegue perto da caminhonete.' : 'Tanque cheio.',
+      primary: true,
+    });
+    out.push({
+      id: 'siphon',
+      label: 'Retirar gasolina de carro abandonado',
+      enabled: !busy && fuel < d.fuelCan.capacity - 0.05 && !!car && (car.fuel ?? 0) > 0 && p.inv.count('mangueira') > 0,
+      reason: p.inv.count('mangueira') === 0 ? 'Precisa de uma mangueira de sifão.' : !car ? 'Chegue perto de um carro abandonado.' : (car.fuel ?? 0) <= 0 ? 'O tanque desse carro está seco.' : 'Galão cheio.',
+    });
+  }
+  if (it.defId === 'barricada') {
+    const e = findEntrance(world);
+    out.push({ id: 'barricade', label: 'Instalar na entrada à frente', enabled: !busy && !!e && p.inv.count('martelo') > 0, reason: p.inv.count('martelo') === 0 ? 'Precisa de um martelo.' : 'Fique de frente para uma porta fechada ou janela.', primary: true });
+  }
   if (d.map) {
     out.push({ id: 'read_map', label: 'Ver mapa', enabled: true, primary: true });
     if (d.map === 'fragmento' || d.map === 'rasgado') {
@@ -69,7 +102,7 @@ export function playerItemActions(world: World, it: ItemInstance): ItemAction[] 
   if (d.tearable) out.push({ id: 'tear', label: 'Rasgar em tiras', enabled: !busy && !eq });
   out.push({ id: 'examine', label: 'Examinar', enabled: true });
   if (p.openContainer) out.push({ id: 'store', label: 'Guardar', enabled: !busy });
-  out.push({ id: 'drop', label: 'Descartar', enabled: !busy });
+  out.push({ id: 'drop', label: 'Descartar', enabled: !busy && !p.vehicleId, reason: 'Saia do veículo para largar itens.' });
   return out;
 }
 
@@ -81,12 +114,23 @@ export function containerItemActions(world: World, c: Container, it: ItemInstanc
   ];
 }
 
-export function describeItem(it: ItemInstance): string {
+const FRESH_LABEL = { fresco: 'Fresco', passado: 'Passado (rende menos)', estragado: 'Estragado (pode causar mal-estar)' };
+
+export function describeItem(it: ItemInstance, now = 0): string {
   const d = itemDef(it.defId);
   const parts = [d.desc];
   if (d.durability && it.condition !== undefined) parts.push(`Condição: ${Math.round((it.condition / d.durability) * 100)}%.`);
-  if (d.weapon?.kind === 'gun') parts.push(`Carregador: ${it.state?.ammo ?? 0}/${d.weapon.magazine}.`);
-  if (d.food?.uses) parts.push(`Restante: ${it.state?.uses ?? 0}/${d.food.uses}.`);
+  if (d.weapon && d.weapon.kind !== 'unarmed') {
+    const w = d.weapon;
+    const rate = (60 / w.cooldown).toFixed(0);
+    parts.push(`Dano ${w.damage} · alcance ${w.kind === 'gun' ? `${Math.round(w.range / TILE)} m` : `${w.range} px`} · cadência ${rate}/min · ruído ${w.noise} m.`);
+  }
+  if (d.weapon?.kind === 'gun') parts.push(`Carregador: ${it.state?.ammo ?? 0}/${d.weapon.magazine} (${itemDef(d.weapon.ammo!).name}).`);
+  if (d.water) parts.push(`Conteúdo: ${lit((it.state?.uses ?? 0) * 0.25)} L de ${lit(d.water.capacity * 0.25)} L${(it.state?.uses ?? 0) > 0 ? (it.state?.contaminated ? ' — água NÃO tratada' : ' — água potável') : ''}.`);
+  if (d.fuelCan) parts.push(`Gasolina: ${lit(it.state?.fuel ?? 0)} L de ${d.fuelCan.capacity} L.`);
+  if (d.food?.kcal) parts.push(`Valor nutricional: ~${d.food.kcal} kcal.`);
+  const fr = freshness(it, now);
+  if (fr) parts.push(`Conservação: ${FRESH_LABEL[fr]}.`);
   if (d.medical && d.medical.uses > 1) parts.push(`Usos: ${it.state?.uses ?? d.medical.uses}.`);
   if (d.light) parts.push(`Estado: ${it.state?.on ? 'ligada' : 'desligada'}. Bateria: ${Math.round(it.state?.battery ?? 0)}%.`);
   if (d.radio)
@@ -118,9 +162,7 @@ export function canDropBag(p: Player, uid: string): boolean {
   if (p.equipped.costas !== uid) return true;
   const bag = p.inv.get(uid);
   if (!bag) return true;
-  const extra = itemDef(bag.defId).backpack!;
-  const w = p.inv.weight() - (p.openContainer ? 0 : 0);
-  return w <= p.inv.baseWeight + 1e-6 && p.inv.items.length <= p.inv.baseSlots;
+  return p.inv.weight() <= p.inv.baseWeight + 1e-6 && p.inv.items.length <= p.inv.baseSlots;
 }
 
 /** Pilha de itens no chão próxima ao jogador (cria se não existir). */
@@ -140,38 +182,73 @@ export function doPlayerItemAction(world: World, actionId: string, uid: string):
   if (!it) return;
   const d = itemDef(it.defId);
   const changed = () => world.events.emit('inventoryChanged', {});
+  const N = CONFIG.needs;
 
   switch (actionId) {
     case 'consume': {
       const f = d.food!;
-      startAction(world, 'consume', f.verb === 'Beber' ? 'Bebendo' : 'Comendo', f.verb === 'Beber' ? 0.9 : 1.4, () => {
+      const drink = f.verb === 'Beber';
+      startAction(world, 'consume', drink ? 'Bebendo' : 'Comendo', drink ? 0.9 : 1.4, () => {
         const cur = p.inv.get(uid);
         if (!cur) return;
-        p.hunger = Math.max(0, Math.min(100, p.hunger - (f.hunger ?? 0)));
-        p.thirst = Math.max(0, Math.min(100, p.thirst - (f.thirst ?? 0)));
-        world.sound(f.verb === 'Beber' ? 'drink' : 'eat', p.x, p.y, 0.6);
-        world.msg(`Você ${f.verb === 'Beber' ? 'bebeu' : 'comeu'}: ${d.name.toLowerCase()}.`, 'good');
-        consumeUse(p, cur);
+        if (d.water && (cur.state?.uses ?? 0) <= 0) return;
+        let mul = 1;
+        let sick = false;
+        const fr = freshness(cur, world.gameMinutes);
+        if (fr === 'passado') mul = 0.7;
+        if (fr === 'estragado') {
+          mul = 0.4;
+          if (world.rng.chance(N.rottenSickChance)) sick = true;
+        }
+        if (d.water && cur.state?.contaminated && world.rng.chance(N.dirtyWaterSickChance)) sick = true;
+        p.hunger = Math.max(0, Math.min(100, p.hunger - (f.hunger ?? 0) * mul));
+        p.thirst = Math.max(0, Math.min(100, p.thirst - (f.thirst ?? 0) * (d.water ? 1 : mul)));
+        world.sound(drink ? 'drink' : 'eat', p.x, p.y, 0.6);
+        let txt = drink ? `Você bebeu: ${d.water ? '250 ml de água' : d.name.toLowerCase()}.` : `Você comeu: ${d.name.toLowerCase()}.`;
+        if (fr === 'passado') txt += ' Não estava tão bom.';
+        if (fr === 'estragado') txt += ' Tinha um gosto horrível.';
+        world.msg(txt, fr === 'estragado' ? 'warn' : 'good');
+        if (sick) {
+          p.sickHours = Math.max(p.sickHours, N.sickHours);
+          world.msg('Você sente náusea. Seu corpo vai sofrer por algumas horas.', 'danger');
+        }
+        if (d.water) {
+          cur.state!.uses = (cur.state!.uses ?? 1) - 1;
+          if (cur.state!.uses <= 0) cur.state!.contaminated = false;
+        } else consumeUse(p, cur);
         changed();
       });
       break;
     }
+    case 'empty':
+      if (it.state) {
+        it.state.uses = 0;
+        it.state.contaminated = false;
+        world.msg(`Você esvaziou: ${d.name.toLowerCase()}.`);
+        changed();
+      }
+      break;
     case 'treat': {
       const m = d.medical!;
-      const w = p.health.worstUntreated();
+      const kind = m.kind as TreatKind;
+      const w = p.health.bestTarget(kind);
       if (!w) return;
-      startAction(world, 'treat', d.id === 'kit_medico' ? 'Usando kit médico' : 'Fazendo curativo', m.time, () => {
+      const label = kind === 'kit' ? 'Usando kit de primeiros socorros' : kind === 'antisseptico' ? 'Limpando ferimento' : 'Fazendo curativo';
+      startAction(world, 'treat', label, m.time, () => {
         const cur = p.inv.get(uid);
         if (!cur || !p.health.wounds.includes(w)) return;
-        p.health.treat(w, m.quality);
-        if (m.kind === 'kit') p.health.hp = Math.min(p.health.max, p.health.hp + 6);
+        p.health.treat(w, kind, m.quality);
+        if (kind === 'kit') p.health.hp = Math.min(p.health.max, p.health.hp + 6);
         world.sound('cloth', p.x, p.y, 0.6);
-        const stopped = w.bleed === 0;
-        world.msg(
-          `${WOUND_LABEL[w.type]} ${w.type === 'arranhao' ? 'tratado' : 'tratada'}. ${stopped ? 'O sangramento parou.' : 'O sangramento diminuiu, mas continua.'}` +
-            (w.type === 'mordida' ? ' A mordida, porém, continua infeccionada.' : ''),
-          stopped ? 'good' : 'warn',
-        );
+        const name = WOUND_LABEL[w.type];
+        const art = w.type === 'arranhao' ? 'o' : 'a';
+        if (kind === 'antisseptico') world.msg(`${name} limp${art}. Agora pode cicatrizar.`, 'good');
+        else {
+          const stopped = w.bleed === 0;
+          let txt = `${name} (${WOUND_SEVERITY[w.type]}) tratad${art}. ${stopped ? 'O sangramento parou.' : 'O sangramento diminuiu, mas continua.'}`;
+          if (w.dirty) txt += ' Material não estéril: limpe com antisséptico ou o ferimento pode infeccionar.';
+          world.msg(txt, stopped ? 'good' : 'warn');
+        }
         consumeUse(p, cur);
         changed();
       });
@@ -222,6 +299,21 @@ export function doPlayerItemAction(world: World, actionId: string, uid: string):
     case 'reload':
       startReload(world);
       break;
+    case 'unload': {
+      const w = d.weapon!;
+      const n = it.state?.ammo ?? 0;
+      const ammo = createItem(w.ammo!, n);
+      const r = p.inv.add(ammo);
+      if (!r.ok) {
+        world.msg(r.reason ?? 'Sem espaço para a munição.', 'warn');
+        return;
+      }
+      it.state!.ammo = 0;
+      world.sound('reload', p.x, p.y, 0.4);
+      world.msg(`Você retirou ${n} cartucho(s).`);
+      changed();
+      break;
+    }
     case 'toggle': {
       if (!it.state) return;
       if (!it.state.on && (it.state.battery ?? 0) <= 0) {
@@ -253,6 +345,50 @@ export function doPlayerItemAction(world: World, actionId: string, uid: string):
         changed();
       });
       break;
+    case 'refuel': {
+      const v = nearestVehicle(world);
+      if (!v) return;
+      const amount = Math.min(it.state?.fuel ?? 0, v.def.fuelCapacity - v.fuel);
+      if (amount <= 0) return;
+      startAction(world, 'refuel', `Abastecendo a ${v.def.name.toLowerCase()}`, 1 + amount * 0.4, () => {
+        const cur = p.inv.get(uid);
+        if (!cur) return;
+        const n = Math.min(cur.state?.fuel ?? 0, v.def.fuelCapacity - v.fuel);
+        cur.state!.fuel = (cur.state!.fuel ?? 0) - n;
+        v.fuel += n;
+        world.sound('drink', p.x, p.y, 0.5);
+        world.msg(`Você colocou ${lit(n)} L de gasolina. Tanque: ${lit(v.fuel)} / ${v.def.fuelCapacity} L.`, 'good');
+        changed();
+        world.events.emit('requestSave', {});
+      });
+      break;
+    }
+    case 'siphon': {
+      const car = nearestSiphonCar(world);
+      if (!car || !d.fuelCan) return;
+      const room = d.fuelCan.capacity - (it.state?.fuel ?? 0);
+      const amount = Math.min(car.fuel ?? 0, room);
+      if (amount <= 0) return;
+      // peso extra da gasolina
+      if (p.inv.weight() + amount * 0.75 > p.inv.maxWeight + 1e-6) {
+        world.msg('Com essa gasolina o galão ficaria pesado demais para você carregar.', 'warn');
+        return;
+      }
+      world.makeNoise(p.x, p.y, 2, 'sifao', true, p.id);
+      startAction(world, 'siphon', 'Retirando gasolina com a mangueira', 2 + amount * 0.6, () => {
+        const cur = p.inv.get(uid);
+        if (!cur) return;
+        const n = Math.min(car.fuel ?? 0, d.fuelCan!.capacity - (cur.state?.fuel ?? 0));
+        car.fuel = Math.max(0, (car.fuel ?? 0) - n);
+        cur.state!.fuel = (cur.state!.fuel ?? 0) + n;
+        world.msg(`Você retirou ${lit(n)} L de gasolina. Galão: ${lit(cur.state!.fuel)} L.`, 'good');
+        changed();
+      });
+      break;
+    }
+    case 'barricade':
+      installBarricade(world);
+      break;
     case 'read_map':
       world.events.emit('openMap', {});
       break;
@@ -281,7 +417,7 @@ export function doPlayerItemAction(world: World, actionId: string, uid: string):
       });
       break;
     case 'examine':
-      world.msg(`${d.name}: ${describeItem(it)}`);
+      world.msg(`${d.name}: ${describeItem(it, world.gameMinutes)}`);
       break;
     case 'store': {
       const c = p.openContainer ? world.getContainer(p.openContainer) : undefined;
@@ -299,9 +435,11 @@ export function doPlayerItemAction(world: World, actionId: string, uid: string):
       } else world.sound('container', p.x, p.y, 0.4);
       p.validateEquipment();
       changed();
+      if (r.ok) world.events.emit('requestSave', {});
       break;
     }
     case 'drop': {
+      if (p.vehicleId) return;
       const slot = p.isEquipped(uid);
       if (slot === 'costas' && !canDropBag(p, uid)) {
         world.msg('Você não consegue carregar tudo sem a mochila.', 'warn');
@@ -342,7 +480,7 @@ export function takeAll(world: World, c: Container) {
     else fail = r.reason;
   }
   if (any) world.sound('pickup', p.x, p.y, 0.5);
-  if (fail) world.msg(fail, 'warn');
+  if (fail) world.msg(`Nem tudo coube: ${fail.toLowerCase()}`, 'warn');
   world.events.emit('inventoryChanged', {});
 }
 
@@ -360,7 +498,7 @@ export function startReload(world: World) {
     return;
   }
   if (p.inv.count(w.ammo!) <= 0) {
-    world.msg('Sem munição para recarregar.', 'warn');
+    world.msg(`Sem ${itemDef(w.ammo!).name.toLowerCase()} para recarregar.`, 'warn');
     return;
   }
   world.sound('reload', p.x, p.y, 0.7);

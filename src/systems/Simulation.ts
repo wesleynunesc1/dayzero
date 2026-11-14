@@ -1,4 +1,8 @@
-import { TILE } from '../config';
+import { CONFIG, TILE } from '../config';
+import { dist } from '../engine/math';
+import { WEATHER_LABEL } from './Weather';
+import { updateVehicle, vehicleObstacles } from './VehicleSystem';
+import { endSleep } from './Interaction';
 import { Actor } from '../entities/Actor';
 import { Ally } from '../entities/Ally';
 import { Zombie } from '../entities/Zombie';
@@ -6,7 +10,7 @@ import type { PlayerCommand, World } from '../world/World';
 import { allyHear, updateAlly } from './AllyAI';
 import { NoiseSystem } from './Noise';
 import { integrate, separate } from './Physics';
-import { updatePlayer } from './PlayerController';
+import { driveInput, updatePlayer } from './PlayerController';
 import { updateZombie, zombieHear } from './ZombieAI';
 
 /** Orquestra a simulação em passo fixo. */
@@ -29,6 +33,11 @@ export class Simulation {
           else if (l instanceof Ally) allyHear(world, l, n, i);
         },
       );
+      // barulho alheio por perto acorda quem está dormindo
+      const p = world.player;
+      if (p.sleep && !n.byPlayer && dist(n.x, n.y, p.x, p.y) < n.radius * TILE * 0.8 && n.radius >= 6) {
+        endSleep(world, n.kind === 'pancadas' ? 'Você acordou com pancadas na porta!' : 'Um barulho te acordou.');
+      }
     };
   }
 
@@ -38,14 +47,32 @@ export class Simulation {
     w.time += dt;
     w.pathfinder.searchesThisTick = 0;
 
+    const hours = (dt * CONFIG.time.minutesPerSecond) / 60;
+    const changed = w.weather.update(dt, hours);
+    if (changed) {
+      w.events.emit('weatherChanged', { kind: changed });
+      if (!w.player.sleep) w.msg(changed === 'chuva' ? 'Começou a chover. A chuva abafa os sons.' : changed === 'neblina' ? 'Uma neblina baixa toma o bairro. Difícil enxergar longe.' : `${WEATHER_LABEL[changed]}.`, 'info');
+    }
+    // barris de chuva enchem
+    if (w.weather.rain > 0.05) {
+      for (const s of w.waterSources) if (s.collectsRain) s.liters = Math.min(s.capacity, s.liters + CONFIG.weather.rainBarrelLitersPerHour * w.weather.rain * hours);
+    }
+
     updatePlayer(w, cmd, dt);
+    for (const v of w.vehicles) updateVehicle(w, v, v.occupant === w.player.id ? driveInput : null, dt);
     for (const a of w.allies) updateAlly(w, a, dt);
     for (const z of w.zombies) updateZombie(w, z, dt);
 
-    if (w.player.alive) integrate(w, w.player, dt);
+    if (w.player.alive && !w.player.vehicleId) integrate(w, w.player, dt);
     for (const a of w.allies) if (a.state !== 'morto') integrate(w, a, dt);
     for (const z of w.zombies) integrate(w, z, dt);
     separate(w);
+    vehicleObstacles(w);
+    const pv = w.vehicleById(w.player.vehicleId);
+    if (pv) {
+      w.player.x = pv.x;
+      w.player.y = pv.y;
+    }
 
     // portas (animação)
     for (const d of w.map.doors) {

@@ -12,7 +12,7 @@ import { T, TILES } from '../world/tiles';
 import type { World } from '../world/World';
 import { Ctx, ellipse, makeCanvas } from './canvas';
 import { drawDecal } from './Decals';
-import { drawCanopy, drawDoor, drawHuman, drawProp, drawTreeShadow, HumanPose, makeRoof } from './Sprites';
+import { drawCanopy, drawDoor, drawHuman, drawProp, drawTreeShadow, drawVehicle, HumanPose, makeRoof } from './Sprites';
 import { TileTextures } from './Textures';
 
 const CH = CHUNK * TILE;
@@ -200,7 +200,7 @@ export class Renderer {
             ctx.fillStyle = 'rgba(0,0,0,0.18)';
             ctx.fillRect(px, py + 14, TILE, 2);
           }
-        } else if (t === T.WINDOW || t === T.WINDOW_BROKEN) {
+        } else if (t === T.WINDOW || t === T.WINDOW_BROKEN || t === T.WINDOW_BOARDED) {
           // usa a parede vizinha como moldura
           let wt: number = T.WALL_PLASTER;
           for (const [dx, dy] of [
@@ -216,7 +216,30 @@ export class Renderer {
             }
           }
           const horiz = wallLike(x - 1, y) || wallLike(x + 1, y) || (map.doorAt(x - 1, y) ?? map.doorAt(x + 1, y)) !== undefined;
-          if (t === T.WINDOW) {
+          if (t === T.WINDOW_BOARDED) {
+            ctx.drawImage(this.tex.get(wt, hash2(x, y) % 4), px, py);
+            ctx.fillStyle = '#4c5a60';
+            if (horiz) ctx.fillRect(px, py + 5, TILE, 5);
+            else ctx.fillRect(px + 5, py, 5, TILE);
+            // tábuas pregadas
+            ctx.fillStyle = '#7a6040';
+            ctx.save();
+            ctx.translate(px + 8, py + 8);
+            for (const [a, o] of [
+              [0.35, -3],
+              [-0.3, 3],
+            ]) {
+              ctx.save();
+              ctx.rotate(horiz ? a : a + Math.PI / 2);
+              ctx.fillRect(-9, o - 1.5, 18, 3);
+              ctx.fillStyle = '#5a4428';
+              ctx.fillRect(-7, o - 0.5, 1, 1);
+              ctx.fillRect(6, o - 0.5, 1, 1);
+              ctx.fillStyle = '#7a6040';
+              ctx.restore();
+            }
+            ctx.restore();
+          } else if (t === T.WINDOW) {
             ctx.drawImage(this.tex.get(wt, hash2(x, y) % 4), px, py);
             ctx.fillStyle = '#4c5a60';
             if (horiz) ctx.fillRect(px, py + 5, TILE, 5);
@@ -317,7 +340,8 @@ export class Renderer {
     const vis = this.visStamp;
     const poly = this.visPoly;
     poly.length = 0;
-    const R = Math.max(this.viewW, this.viewH) * 0.8 * (down ? 0.6 : 1);
+    const night = world.nightFactor * (world.player.flashlight ? 0.3 : 1);
+    const R = Math.max(this.viewW, this.viewH) * 0.8 * (down ? 0.6 : 1) * Math.max(0.35, world.weather.visionMul * (1 - 0.35 * night));
     const Rb = 64;
     const N = 280;
     const sx = Math.floor(px / TILE);
@@ -450,11 +474,14 @@ export class Renderer {
       }
     }
 
+    // ---- veículos
+    for (const v of world.vehicles) if (inView(v.x, v.y, 40)) drawVehicle(L, v, world.nightFactor);
+
     // ---- personagens (ordenados por Y)
     const actors: Actor[] = [];
     for (const z of world.zombies) if (inView(z.x, z.y) && (overview || this.isVisible(world, z))) actors.push(z);
     for (const a of world.allies) if (a.state !== 'morto' && inView(a.x, a.y) && (overview || this.isVisible(world, a))) actors.push(a);
-    if (p.alive && !overview) actors.push(p);
+    if (p.alive && !overview && !p.vehicleId) actors.push(p);
     actors.sort((a, b) => a.y - b.y);
     for (const a of actors) this.drawActor(L, a, world);
 
@@ -584,7 +611,7 @@ export class Renderer {
     const z = this.zoom;
     ctx.drawImage(this.low, -fracX * z, -fracY * z, this.lowW * z, this.lowH * z);
 
-    if (opt.showCursor && p.alive) this.drawCursor(world, cam, opt.mouseX * this.dpr, opt.mouseY * this.dpr);
+    if (opt.showCursor && p.alive && !p.vehicleId && !p.sleep) this.drawCursor(world, cam, opt.mouseX * this.dpr, opt.mouseY * this.dpr);
     const ms = performance.now() - t0;
     this.frameMs = this.frameMs * 0.92 + ms * 0.08;
   }
@@ -601,7 +628,10 @@ export class Renderer {
     C.setTransform(1, 0, 0, 1, 0, 0);
     C.globalCompositeOperation = 'source-over';
     C.clearRect(0, 0, this.lowW, this.lowH);
-    C.fillStyle = 'rgba(20,24,44,0.2)';
+    const night = world.nightFactor;
+    const wx = world.weather;
+    const amb = Math.min(0.82, 0.18 + 0.56 * night + 0.08 * wx.rain + 0.05 * wx.fog);
+    C.fillStyle = `rgba(${Math.round(20 - 10 * night)},${Math.round(24 - 8 * night)},${Math.round(44 + 6 * night)},${amb})`;
     C.fillRect(0, 0, this.lowW, this.lowH);
     C.translate(-left, -top);
     // interiores são mais escuros (luz só pelas janelas e portas)
@@ -619,7 +649,22 @@ export class Renderer {
       C.fillStyle = g;
       C.fillRect(x - r, y - r, r * 2, r * 2);
     };
-    if (p.alive && !overview) radial(p.x, p.y, inside >= 0 ? 72 : 48, inside >= 0 ? 0.6 : 0.4);
+    if (p.alive && !overview) radial(p.x, p.y, (inside >= 0 ? 72 : 48) * (1 - 0.35 * night), inside >= 0 ? 0.6 : 0.4 + 0.25 * night);
+    // faróis da caminhonete (cone de luz à frente)
+    for (const v of world.vehicles) {
+      if (!v.engineOn) continue;
+      const hx = v.x + Math.cos(v.angle) * (v.def.length / 2);
+      const hy = v.y + Math.sin(v.angle) * (v.def.length / 2);
+      const g = C.createRadialGradient(hx, hy, 2, hx, hy, 150);
+      g.addColorStop(0, 'rgba(0,0,0,0.9)');
+      g.addColorStop(1, 'rgba(0,0,0,0)');
+      C.fillStyle = g;
+      C.beginPath();
+      C.moveTo(hx, hy);
+      C.arc(hx, hy, 150, v.angle - 0.4, v.angle + 0.4);
+      C.closePath();
+      C.fill();
+    }
     for (const l of world.lights) {
       const f = l.kind === 'fire' ? 0.85 + Math.sin(time * 11 + l.x) * 0.12 : this.lampFlicker(l.x, time);
       if (f > 0.05) radial(l.x, l.y, l.r, 0.85 * f);
@@ -659,14 +704,18 @@ export class Renderer {
     const W = this.lowW;
     const H = this.lowH;
     const p = world.player;
-    // gradação de cor: luz alaranjada vinda do leste, sombras frias
+    // gradação de cor conforme a hora: amanhecer/entardecer alaranjados, noite fria
+    const hr = world.hour;
+    const golden = hr >= 5 && hr < 8.5 ? 1 - Math.abs(hr - 6.5) / 2 : hr >= 16.5 && hr < 19.5 ? 1 - Math.abs(hr - 18) / 1.5 : 0;
+    const morning = hr < 12;
     L.globalCompositeOperation = 'soft-light';
-    const g = L.createLinearGradient(W, 0, 0, H);
-    g.addColorStop(0, 'rgba(255,170,110,0.55)');
+    const g = morning ? L.createLinearGradient(W, 0, 0, H) : L.createLinearGradient(0, 0, W, H);
+    g.addColorStop(0, `rgba(255,170,110,${0.15 + 0.4 * Math.max(0, golden)})`);
     g.addColorStop(0.55, 'rgba(150,140,130,0.15)');
-    g.addColorStop(1, 'rgba(60,80,120,0.45)');
+    g.addColorStop(1, `rgba(60,80,120,${0.3 + 0.3 * world.nightFactor})`);
     L.fillStyle = g;
     L.fillRect(0, 0, W, H);
+    this.weatherFx(world);
     // dessaturação leve (paleta pós-apocalíptica)
     L.globalCompositeOperation = 'saturation';
     L.fillStyle = 'rgba(128,128,128,0.18)';
@@ -691,13 +740,56 @@ export class Renderer {
       L.fillStyle = rg;
       L.fillRect(0, 0, W, H);
     }
-    if (p.health.infectionStage >= 2) {
-      const k = p.health.infectionStage >= 3 ? 0.55 : 0.3;
+    if (p.sickHours > 0 || p.health.infected || p.fatigue >= 90) {
+      const k = p.health.infected ? 0.55 : 0.25;
       L.globalCompositeOperation = 'saturation';
       L.fillStyle = `rgba(128,128,128,${k})`;
       L.fillRect(0, 0, W, H);
       L.globalCompositeOperation = 'source-over';
       L.fillStyle = `rgba(90,110,40,${0.05 + Math.sin(world.time * 1.3) * 0.03})`;
+      L.fillRect(0, 0, W, H);
+    }
+  }
+
+  /** Chuva (riscos e respingos) e neblina (névoa que engole a distância). */
+  private weatherFx(world: World) {
+    const L = this.lctx;
+    const W = this.lowW;
+    const H = this.lowH;
+    const wx = world.weather;
+    const t = performance.now() / 1000;
+    if (wx.rain > 0.02) {
+      L.fillStyle = `rgba(40,50,70,${0.12 * wx.rain})`;
+      L.fillRect(0, 0, W, H);
+      const n = Math.floor(((W * H) / 600) * wx.rain);
+      L.strokeStyle = `rgba(185,200,220,${0.5 * wx.rain})`;
+      L.lineWidth = 1;
+      L.beginPath();
+      for (let i = 0; i < n; i++) {
+        const sx = (hash2(i, 7) % 1000) / 1000;
+        const sy = (hash2(i, 13) % 1000) / 1000;
+        const sp = 0.8 + (hash2(i, 3) % 100) / 200;
+        const x = ((sx * W + t * 60 * sp) % (W + 20)) - 10;
+        const y = (sy * H + t * 260 * sp) % (H + 20) - 10;
+        L.moveTo(x, y);
+        L.lineTo(x - 2, y + 6);
+      }
+      L.stroke();
+      // respingos no chão
+      L.fillStyle = `rgba(190,205,220,${0.35 * wx.rain})`;
+      for (let i = 0; i < n / 3; i++) {
+        const k = Math.floor(t * 8) + i;
+        L.fillRect(hash2(k, 5) % W, hash2(k, 9) % H, 1, 1);
+      }
+    }
+    if (wx.fog > 0.02) {
+      const cx = W / 2;
+      const cy = H / 2;
+      const fg = L.createRadialGradient(cx, cy, 30, cx, cy, Math.max(W, H) * 0.6);
+      fg.addColorStop(0, `rgba(170,176,180,${0.08 * wx.fog})`);
+      fg.addColorStop(0.45, `rgba(170,176,180,${0.45 * wx.fog})`);
+      fg.addColorStop(1, `rgba(176,182,186,${0.8 * wx.fog})`);
+      L.fillStyle = fg;
       L.fillRect(0, 0, W, H);
     }
   }
@@ -737,7 +829,7 @@ export class Renderer {
       drawHuman(L, {
         ...base,
         crouch: a.crouch,
-        down: a.isDown,
+        down: a.isDown || !!a.sleep,
         weapon: wk,
         weaponLen: d?.weapon?.length,
         weaponColor: d?.id === 'pe_de_cabra' || d?.id === 'cano_ferro' || d?.id === 'martelo' ? '#6a6e70' : d?.id === 'cassetete' ? '#232426' : d?.id === 'faca_cozinha' ? '#a8acac' : '#7a5a3a',

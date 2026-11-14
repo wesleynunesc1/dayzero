@@ -18,6 +18,17 @@ export interface TimedAction {
 
 export type EquipSlot = 'arma' | 'corpo' | 'costas';
 
+export interface SleepState {
+  spot: 'cama' | 'sofa' | 'banco';
+  x: number;
+  y: number;
+  /** Minuto de jogo em que começou. */
+  start: number;
+  /** Horas máximas (descanso curto) ou até recuperar. */
+  maxHours: number;
+  hpAtStart: number;
+}
+
 export const PLAYER_LOOK: Appearance = {
   skin: '#c49a7c',
   hair: '#2f2620',
@@ -55,6 +66,14 @@ export class Player extends Actor {
   shoutCd = 0;
   /** Contador de danos recebidos (para efeitos de tela). */
   hurtPulse = 0;
+  /** Fadiga acumulada (0 descansado … 100 esgotado) — diferente do fôlego de curto prazo. */
+  fatigue = 15;
+  /** Horas de jogo restantes de mal-estar (comida estragada / água não tratada). */
+  sickHours = 0;
+  /** Sono/descanso em andamento. */
+  sleep: SleepState | null = null;
+  /** Veículo em que o jogador está (id), ou null a pé. */
+  vehicleId: string | null = null;
 
   constructor(x: number, y: number) {
     super('p', x, y, { ...PLAYER_LOOK });

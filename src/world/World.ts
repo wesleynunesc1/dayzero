@@ -1,0 +1,353 @@
+import { CONFIG, TILE } from '../config';
+import { createItem, ItemInstance } from '../data/items';
+import { EventBus } from '../engine/EventBus';
+import { dist2, RNG } from '../engine/math';
+import { Actor, Appearance } from '../entities/Actor';
+import { Ally } from '../entities/Ally';
+import { Player } from '../entities/Player';
+import { Zombie, zombieLook } from '../entities/Zombie';
+import { Inventory } from '../systems/Inventory';
+import { WoundType } from '../systems/Health';
+import { buildNeighborhood } from './MapBuilder';
+import { Pathfinder } from './Pathfinder';
+import { TileMap } from './TileMap';
+import { TILES } from './tiles';
+import type { NoiseEvent } from '../systems/Noise';
+import {
+  Building,
+  Container,
+  Corpse,
+  Decal,
+  LightSource,
+  MapLabel,
+  Prop,
+  SafePoint,
+  Tree,
+} from './types';
+
+export type Tone = 'info' | 'warn' | 'danger' | 'good' | 'npc';
+export type SoundName =
+  | 'step'
+  | 'punch'
+  | 'swing'
+  | 'hit'
+  | 'gunshot'
+  | 'empty'
+  | 'reload'
+  | 'glass'
+  | 'door_open'
+  | 'door_close'
+  | 'door_bash'
+  | 'door_break'
+  | 'groan'
+  | 'alert'
+  | 'pickup'
+  | 'hurt'
+  | 'bite'
+  | 'zdie'
+  | 'eat'
+  | 'drink'
+  | 'cloth'
+  | 'shout'
+  | 'container';
+
+export interface WorldEvents {
+  message: { text: string; tone: Tone };
+  noise: { x: number; y: number; radius: number; kind: string; byPlayer: boolean };
+  sound: { name: SoundName; x: number; y: number; vol: number };
+  playerHurt: { amount: number; kind: WoundType | 'golpe' };
+  playerDied: { cause: string };
+  playerRespawned: { name: string };
+  inventoryChanged: Record<string, never>;
+  openContainer: { id: string };
+  closeContainer: Record<string, never>;
+  shot: { x: number; y: number };
+  openMap: Record<string, never>;
+  allyDialog: { allyId: string };
+}
+
+export interface Particle {
+  x: number;
+  y: number;
+  vx: number;
+  vy: number;
+  life: number;
+  max: number;
+  kind: 'blood' | 'spark' | 'glass' | 'dust' | 'splinter' | 'smoke';
+  size: number;
+  color: string;
+}
+
+export interface Tracer {
+  x1: number;
+  y1: number;
+  x2: number;
+  y2: number;
+  t: number;
+}
+
+export interface NoiseRing {
+  x: number;
+  y: number;
+  r: number;
+  t: number;
+  max: number;
+}
+
+/** Comando de controle do jogador (vindo do teclado/mouse, toque ou rede no futuro). */
+export interface PlayerCommand {
+  mx: number;
+  my: number;
+  run: boolean;
+  toggleCrouch: boolean;
+  aimX: number;
+  aimY: number;
+  attack: boolean;
+  attackPressed: boolean;
+  aimHeld: boolean;
+  interact: boolean;
+  reload: boolean;
+}
+
+export const EMPTY_COMMAND: PlayerCommand = {
+  mx: 0,
+  my: 0,
+  run: false,
+  toggleCrouch: false,
+  aimX: 0,
+  aimY: 0,
+  attack: false,
+  attackPressed: false,
+  aimHeld: false,
+  interact: false,
+  reload: false,
+};
+
+/** Grade espacial simples para consultas de vizinhança. */
+export class SpatialHash {
+  private cells = new Map<number, Actor[]>();
+  constructor(private size = 32) {}
+  clear() {
+    this.cells.clear();
+  }
+  private key(cx: number, cy: number) {
+    return cy * 4096 + cx;
+  }
+  insert(a: Actor) {
+    const k = this.key(Math.floor(a.x / this.size), Math.floor(a.y / this.size));
+    let c = this.cells.get(k);
+    if (!c) this.cells.set(k, (c = []));
+    c.push(a);
+  }
+  query(x: number, y: number, r: number, out: Actor[]): Actor[] {
+    out.length = 0;
+    const x0 = Math.floor((x - r) / this.size);
+    const x1 = Math.floor((x + r) / this.size);
+    const y0 = Math.floor((y - r) / this.size);
+    const y1 = Math.floor((y + r) / this.size);
+    for (let cy = y0; cy <= y1; cy++)
+      for (let cx = x0; cx <= x1; cx++) {
+        const c = this.cells.get(this.key(cx, cy));
+        if (c) for (const a of c) out.push(a);
+      }
+    return out;
+  }
+}
+
+/**
+ * Estado completo da simulação. Não depende de renderização nem de DOM,
+ * o que permite no futuro rodá-lo em servidor (multiplayer) ou salvar/carregar.
+ */
+export class World {
+  readonly events = new EventBus<WorldEvents>();
+  readonly rng: RNG;
+  map: TileMap;
+  props: Prop[];
+  containers: Map<string, Container>;
+  containerAt: Map<number, string>;
+  trees: Tree[];
+  lights: LightSource[];
+  decals: Decal[];
+  buildings: Building[];
+  safePoints: SafePoint[];
+  labels: MapLabel[];
+  player: Player;
+  zombies: Zombie[] = [];
+  allies: Ally[] = [];
+  corpses: Corpse[] = [];
+  particles: Particle[] = [];
+  tracers: Tracer[] = [];
+  noiseRings: NoiseRing[] = [];
+  pathfinder: Pathfinder;
+  hash = new SpatialHash(32);
+  time = 0;
+  /** Novos decalques (sangue) a serem pintados no cenário pelo renderizador. */
+  pendingDecals: Decal[] = [];
+  playerStart: { x: number; y: number };
+  /** Estatísticas exibidas e úteis em testes. */
+  stats = { zombiesKilled: 0, shotsFired: 0 };
+  private corpseSeq = 0;
+  /** Destino compartilhado de cada horda (id -> ponto). */
+  hordes = new Map<number, { x: number; y: number; t: number }>();
+  /** Conectado pela Simulação: propaga ruídos aos ouvintes. */
+  noiseHook: ((n: NoiseEvent) => void) | null = null;
+
+  constructor(seed = CONFIG.seed) {
+    this.rng = new RNG(seed);
+    const b = buildNeighborhood(seed);
+    this.map = b.map;
+    this.props = b.props;
+    this.containers = b.containers;
+    this.containerAt = b.containerAt;
+    this.trees = b.trees;
+    this.lights = b.lights;
+    this.decals = b.decals;
+    this.buildings = b.buildings;
+    this.safePoints = b.safePoints;
+    this.labels = b.labels;
+    this.playerStart = b.playerStart;
+    this.pathfinder = new Pathfinder(this.map);
+    this.player = new Player(b.playerStart.x, b.playerStart.y);
+    this.player.facing = -Math.PI / 2;
+    this.allies.push(new Ally(b.allyStart.x, b.allyStart.y));
+    for (const s of b.zombies) this.spawnZombie(s.x * TILE, s.y * TILE, s.type, s.outfit, s.horde ?? -1);
+  }
+
+  spawnZombie(x: number, y: number, type: Zombie['ztype'], outfit?: string, horde = -1): Zombie {
+    const z = new Zombie(x, y, type, zombieLook(this.rng, outfit), horde);
+    (z as Zombie & { outfit?: string }).outfit = outfit;
+    this.map.resolveCircle(z, z.radius);
+    this.zombies.push(z);
+    return z;
+  }
+
+  makeNoise(x: number, y: number, radius: number, kind: string, byPlayer: boolean, sourceId: string | null = null) {
+    this.noiseHook?.({ x, y, radius, kind, byPlayer, sourceId });
+  }
+
+  msg(text: string, tone: Tone = 'info') {
+    this.events.emit('message', { text, tone });
+  }
+
+  sound(name: SoundName, x: number, y: number, vol = 1) {
+    this.events.emit('sound', { name, x, y, vol });
+  }
+
+  /** Humanos vivos que podem ser alvo dos zumbis. */
+  humans(): Actor[] {
+    const out: Actor[] = [];
+    if (!this.player.dead) out.push(this.player);
+    for (const a of this.allies) if (a.state !== 'morto') out.push(a);
+    return out;
+  }
+
+  actorById(id: string | null): Actor | null {
+    if (!id) return null;
+    if (this.player.id === id) return this.player.dead ? null : this.player;
+    for (const a of this.allies) if (a.id === id) return a.state === 'morto' ? null : a;
+    for (const z of this.zombies) if (z.id === id) return z;
+    return null;
+  }
+
+  containerAtTile(x: number, y: number): Container | undefined {
+    const id = this.containerAt.get(this.map.idx(x, y));
+    return id ? this.containers.get(id) : undefined;
+  }
+
+  getContainer(id: string): Container | undefined {
+    const c = this.containers.get(id);
+    if (c) return c;
+    return this.corpses.find((k) => k.container.id === id)?.container;
+  }
+
+  // ------------------------------------------------------------- efeitos
+  bloodSpray(x: number, y: number, dirX: number, dirY: number, amount = 6) {
+    for (let i = 0; i < amount; i++) {
+      const sp = this.rng.range(20, 70);
+      const a = Math.atan2(dirY, dirX) + this.rng.range(-0.7, 0.7);
+      this.particles.push({
+        x,
+        y,
+        vx: Math.cos(a) * sp,
+        vy: Math.sin(a) * sp,
+        life: this.rng.range(0.2, 0.45),
+        max: 0.45,
+        kind: 'blood',
+        size: this.rng.range(0.8, 1.6),
+        color: this.rng.chance(0.5) ? '#5e1c18' : '#46140f',
+      });
+    }
+  }
+
+  burst(x: number, y: number, kind: Particle['kind'], n: number, color: string, speed = 40) {
+    for (let i = 0; i < n; i++) {
+      const a = this.rng.range(0, Math.PI * 2);
+      const sp = this.rng.range(speed * 0.3, speed);
+      this.particles.push({ x, y, vx: Math.cos(a) * sp, vy: Math.sin(a) * sp, life: this.rng.range(0.2, 0.6), max: 0.6, kind, size: this.rng.range(0.6, 1.4), color });
+    }
+  }
+
+  addDecal(d: Decal) {
+    this.decals.push(d);
+    this.pendingDecals.push(d);
+  }
+
+  noiseRing(x: number, y: number, radiusTiles: number) {
+    this.noiseRings.push({ x, y, r: radiusTiles * TILE, t: 0, max: 0.9 });
+  }
+
+  // ------------------------------------------------------------- corpos
+  createCorpse(x: number, y: number, facing: number, look: Appearance, name: string, items: ItemInstance[], isPlayer: boolean, zombie: boolean): Corpse {
+    const inv = new Inventory(999);
+    for (const it of items) inv.items.push(it);
+    const container: Container = {
+      id: `corpo${this.corpseSeq++}`,
+      kind: 'corpo',
+      name,
+      x: Math.floor(x / TILE),
+      y: Math.floor(y / TILE),
+      w: 1,
+      h: 1,
+      inv,
+      searched: isPlayer,
+      building: this.map.buildingAtPx(x, y),
+    };
+    const c: Corpse = { id: container.id, x, y, facing, look, name, isPlayer, zombie, container };
+    this.corpses.push(c);
+    // limite de corpos de zumbis sem itens
+    if (this.corpses.length > 70) {
+      const idx = this.corpses.findIndex((k) => k.zombie && k.container.inv.items.length === 0);
+      if (idx >= 0) this.corpses.splice(idx, 1);
+    }
+    return c;
+  }
+
+  zombieDrops(z: Zombie): ItemInstance[] {
+    const out: ItemInstance[] = [];
+    const outfit = (z as Zombie & { outfit?: string }).outfit;
+    if (outfit === 'policia') {
+      if (this.rng.chance(0.45)) out.push(createItem('municao_9mm', this.rng.int(2, 6)));
+      if (this.rng.chance(0.15)) out.push(createItem('cassetete', 1, this.rng.range(0.3, 0.8)));
+    } else if (outfit === 'operario') {
+      if (this.rng.chance(0.3)) out.push(createItem(this.rng.pick(['chave_fenda', 'fita_adesiva', 'alicate'])));
+    } else if (this.rng.chance(0.18)) {
+      out.push(createItem(this.rng.pick(['barra_cereal', 'isqueiro', 'fotografia', 'chocolate', 'bandagem'])));
+    }
+    return out;
+  }
+
+  // ------------------------------------------------------------- consulta
+  zombiesNear(x: number, y: number, r: number): Zombie[] {
+    const r2 = r * r;
+    return this.zombies.filter((z) => dist2(x, y, z.x, z.y) <= r2);
+  }
+
+  tileSlow(x: number, y: number): number {
+    return TILES[this.map.get(Math.floor(x / TILE), Math.floor(y / TILE))].slow ?? 1;
+  }
+
+  buildingOf(a: { x: number; y: number }): Building | null {
+    const b = this.map.buildingAtPx(a.x, a.y);
+    return b >= 0 ? this.buildings[b] : null;
+  }
+}

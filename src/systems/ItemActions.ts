@@ -343,7 +343,7 @@ export function doPlayerItemAction(world: World, actionId: string, uid: string):
     case 'tune': {
       if (!it.state) return;
       const freqs = CONFIG.radio.frequencies;
-      const i = freqs.indexOf(it.state.freq ?? 1);
+      const i = Math.max(-1, freqs.indexOf(it.state.freq ?? 1));
       it.state.freq = freqs[(i + 1) % freqs.length];
       world.msg(`Sintonizado no canal ${it.state.freq}.`);
       changed();

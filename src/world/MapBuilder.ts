@@ -557,7 +557,7 @@ export function buildNeighborhood(seed: number, target?: TileMap): BuiltWorld {
       loot: false,
       items: [(() => {
         const r = createItem('radio');
-        r.state = { on: false, battery: 35, freq: 104.5 };
+        r.state = { on: false, battery: 35, freq: 1 };
         return r;
       })()],
     });

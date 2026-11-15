@@ -44,6 +44,7 @@ export class Simulation {
       world.missions.seedSideMissions();
     }
     installSocialHooks(world);
+    world.events.on('sleepEnd', ({ hours }) => hours >= 1 && world.missions?.onEvent('dormiu', { by: world.player.id }));
     installBotChat(world);
     world.noiseHook = (n) => {
       this.worldSim.noise(n.x, n.y, n.radius);

@@ -1,16 +1,20 @@
 {
   "name": "o-ultimo-amanhecer",
   "private": true,
-  "version": "0.2.0",
-  "description": "O Último Amanhecer — Etapa 02: sistemas de sobrevivência (fome, sede, sono, veículo, crafting, clima, salvamento)",
+  "version": "0.5.0",
+  "description": "O Último Amanhecer — survival 2D cooperativo (Etapas 1 a 5): mundo aberto, NPCs, facções, rádio, campanha e multijogador com servidor autoritativo",
   "type": "module",
   "scripts": {
     "dev": "vite",
     "build": "tsc --noEmit && vite build",
     "preview": "vite preview",
     "typecheck": "tsc --noEmit",
-    "test": "tsx tests/etapa2.test.ts && tsx tests/ai.test.ts && tsx tests/items.test.ts && tsx tests/sim.test.ts",
-    "test:e2e": "node tests/e2e-etapa1.mjs && node tests/e2e-etapa2.mjs"
+    "test": "tsx tests/etapa3.test.ts && tsx tests/campanha.test.ts",
+    "test:e2e": "node tests/e2e-etapa1.mjs && node tests/e2e-etapa2.mjs && node tests/e2e-etapa3.mjs",
+    "server": "tsx server/index.ts",
+    "test:etapa2": "tsx tests/etapa2.test.ts && tsx tests/ai.test.ts && tsx tests/items.test.ts",
+    "test:etapa3": "tsx tests/etapa3.test.ts",
+    "test:campanha": "tsx tests/campanha.test.ts"
   },
   "devDependencies": {
     "typescript": "^5.6.0",

@@ -32,7 +32,8 @@ const mem = new WeakMap<Player, BotMem>();
 
 function m(p: Player): BotMem {
   let b = mem.get(p);
-  if (!b) mem.set(p, (b = { path: null, pathGoal: '', pathT: 0, think: 0, cmd: { ...EMPTY_COMMAND }, goal: null, lastRadio: -999, scavT: 0 }));
+  // nas primeiras horas o sobrevivente da IA cuida de si (abrigo, comida); só depois sai à procura de rádio/arma
+  if (!b) mem.set(p, (b = { path: null, pathGoal: '', pathT: 0, think: 0, cmd: { ...EMPTY_COMMAND }, goal: null, lastRadio: -999, scavT: 480 + p.slot * 240 }));
   return b;
 }
 
@@ -195,6 +196,19 @@ function selfCare(w: World, p: Player) {
 function currentGoal(w: World, p: Player, b: BotMem) {
   const ms = w.missions;
   if (ms && ms.chapter >= 4 && ms.rendezvous) return { x: ms.rendezvous.x * TILE, y: ms.rendezvous.y * TILE, why: `encontro ${ms.rendezvous.name}` };
+  // primeiro o básico: comida e água por perto (casa inicial e vizinhança)
+  const hasFood = p.inv.items.some((i) => itemDef(i.defId).food && itemDef(i.defId).category === 'Comida');
+  const hasWater = p.inv.items.some((i) => (i.defId === 'agua' && (i.state?.uses ?? 0) > 0) || itemDef(i.defId).food?.verb === 'Beber');
+  const needFood = !hasFood && (p.hunger > 35 || b.scavT > 0);
+  const needWater = !hasWater && (p.thirst > 35 || b.scavT > 0);
+  if (needFood || needWater) {
+    const c = nearestContainerWhere(w, p, 30, (id) => (needFood && !!itemDef(id).food && itemDef(id).category === 'Comida') || (needWater && (id === 'agua' || itemDef(id).food?.verb === 'Beber')));
+    if (c) {
+      const g = { x: (c.x + c.w / 2) * TILE, y: (c.y + c.h / 2) * TILE, why: 'buscar comida' };
+      if (dist(g.x, g.y, p.x, p.y) < 1.8 * TILE) lootContainer(w, p, c);
+      return g;
+    }
+  }
   // capítulos iniciais: procurar rádio e equipamento na própria região
   const want = !radioOf(p) ? 'radio' : !p.weaponItem && !p.inv.items.some((i) => itemDef(i.defId).weapon) ? 'arma' : null;
   if (want && b.scavT <= 0) {
@@ -210,6 +224,17 @@ function currentGoal(w: World, p: Player, b: BotMem) {
     b.scavT = 120;
   }
   return b.goal;
+}
+
+function nearestContainerWhere(w: World, p: Player, rangeTiles: number, ok: (defId: string) => boolean) {
+  let best = null as null | { c: NonNullable<ReturnType<World['containers']['get']>>; d: number };
+  for (const c of w.containers.values()) {
+    if (c.owner) continue;
+    const d = dist((c.x + c.w / 2) * TILE, (c.y + c.h / 2) * TILE, p.x, p.y);
+    if (d > rangeTiles * TILE || (best && d >= best.d)) continue;
+    if (c.inv.items.some((i) => ok(i.defId))) best = { c, d };
+  }
+  return best?.c ?? null;
 }
 
 function nearestContainerWith(w: World, p: Player, want: 'radio' | 'arma', rangeTiles: number) {

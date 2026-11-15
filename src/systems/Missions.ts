@@ -77,7 +77,7 @@ export class Missions {
         { id: 'c3_contato', text: 'Falar pelo rádio com outro sobrevivente ou com a Base Sentinela', check: () => !!this.flags.contato },
       ] },
       { n: 4, title: 'Encontrar os aliados', intro: 'Quatro pessoas, quatro regiões. Pelo rádio, descubram onde cada um está — o mapa não mostra ninguém: só o que vocês disserem.', objectives: [
-        { id: 'c4_todos', text: 'Fazer contato com todos os sobreviventes do grupo', check: () => alive().every((p) => alive().every((o) => o === p || p.contacts.has(o.id) || o.contacts.has(p.id))) },
+        { id: 'c4_todos', text: 'Fazer contato com todos os sobreviventes do grupo', check: () => contactGraphConnected(alive()) },
         { id: 'c4_ponto', text: 'Combinar um ponto de encontro pelo rádio (diga o nome de uma cidade ou abrigo)', check: () => !!this.rendezvous || alive().length <= 1 },
       ] },
       { n: 5, title: 'O reencontro', intro: 'Atravessar regiões inteiras a pé ou de carro, com o combustível que der. Encontrem-se.', objectives: [
@@ -426,6 +426,26 @@ export class Missions {
     }
     return null;
   }
+}
+
+/** Todos ligados por uma cadeia de contatos (rádio ou conversa)? Ex.: A falou com B e com C. */
+export function contactGraphConnected(ps: { id: string; contacts: Set<string> }[]): boolean {
+  if (ps.length <= 1) return true;
+  const ids = new Set(ps.map((p) => p.id));
+  const seen = new Set([ps[0].id]);
+  const queue = [ps[0].id];
+  while (queue.length) {
+    const cur = queue.shift()!;
+    for (const p of ps) {
+      if (seen.has(p.id)) continue;
+      const me = ps.find((x) => x.id === cur)!;
+      if (me.contacts.has(p.id) || p.contacts.has(cur)) {
+        seen.add(p.id);
+        queue.push(p.id);
+      }
+    }
+  }
+  return [...ids].every((id) => seen.has(id));
 }
 
 export function inLab(w: World, x: number, y: number) {

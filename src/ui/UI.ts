@@ -284,7 +284,8 @@ export class UI {
     const box = this.title.querySelector('[data-k=lobby]') as HTMLElement;
     box.classList.remove('hidden');
     if (!st) {
-      const def = location.protocol.startsWith('http') && location.port ? `ws://${location.host}/ws` : 'ws://localhost:8787/ws';
+      // servido pelo próprio servidor do jogo → mesmo endereço; Vite/arquivo local → porta padrão do servidor
+      const def = location.protocol.startsWith('http') && location.port && location.port !== '5173' ? `ws://${location.host}/ws` : `ws://${location.hostname || 'localhost'}:${CONFIG.multiplayer.port}/ws`;
       box.innerHTML = `<div class="label">Servidor</div><input data-k="url" value="${def}" style="background:#151514;color:var(--ink);border:1px solid var(--line);padding:6px"/>
         <div class="label">Seu nome (use o mesmo para voltar ao seu personagem)</div><input data-k="nome" maxlength="24" value="${esc(localStorage.getItem('oua.nome') ?? '')}" style="background:#151514;color:var(--ink);border:1px solid var(--line);padding:6px"/>
         <button class="btn primary" data-l="conectar">Conectar</button>

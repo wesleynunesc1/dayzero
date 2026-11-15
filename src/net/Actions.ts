@@ -63,6 +63,7 @@ export const ACTIONS: Record<string, (w: World, ...args: unknown[]) => ActionRes
     const n = npcNear(w, npcId);
     if (!n) return { dialog: null };
     n.talkingTo = w.player.id;
+    w.missions?.onEvent('conversa', { npc: n.key, by: w.player.id });
     return { dialog: withCampaign(w, n, dialogView(w, n, w.player)) };
   },
   npcChoose: (w, npcId, opt) => {

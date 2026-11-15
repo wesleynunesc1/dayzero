@@ -1,7 +1,7 @@
 import { TILE } from '../config';
 import { itemDef } from '../data/items';
 import { Camera } from '../engine/Camera';
-import { angleDiff, hash2, lerp, smoothstep } from '../engine/math';
+import { angleDiff, hash2, lerp, RNG, smoothstep } from '../engine/math';
 import { Actor } from '../entities/Actor';
 import { Ally } from '../entities/Ally';
 import { Player } from '../entities/Player';
@@ -10,19 +10,20 @@ import type { Interactable } from '../systems/Interaction';
 import { CHUNK } from '../world/TileMap';
 import { T, TILES } from '../world/tiles';
 import type { World } from '../world/World';
+import { CharPose, drawCharacter, drawFacadeDoor, drawFacadeWindow, drawTree, drawTreeShadow3q, FACADE_H, facadeStyle, makeBuildingSprite, ROOF_RISE, treeTop } from './Art';
 import { Ctx, ellipse, makeCanvas } from './canvas';
 import { drawDecal } from './Decals';
-import { drawCanopy, drawDoor, drawHuman, drawProp, drawTreeShadow, drawVehicle, HumanPose, makeRoof } from './Sprites';
+import { drawDoor, drawProp, drawVehicle } from './Sprites';
 import { TileTextures } from './Textures';
 
 const CH = CHUNK * TILE;
 
 const WALL_FACE: Record<number, string> = {
-  [T.WALL_BRICK]: '#4f342b',
-  [T.WALL_PLASTER]: '#6f6554',
-  [T.WALL_BLUE]: '#515e66',
-  [T.WALL_SAGE]: '#58604c',
-  [T.WALL_CONCRETE]: '#5f5f5b',
+  [T.WALL_BRICK]: '#8a5040',
+  [T.WALL_PLASTER]: '#a89a80',
+  [T.WALL_BLUE]: '#7a8e9a',
+  [T.WALL_SAGE]: '#8a9672',
+  [T.WALL_CONCRETE]: '#8e8e88',
 };
 
 export interface RenderOptions {
@@ -127,7 +128,7 @@ export class Renderer {
   private roof(id: number): HTMLCanvasElement {
     let r = this.roofs.get(id);
     if (!r) {
-      r = makeRoof(this.world!.buildings[id]);
+      r = makeBuildingSprite(this.world!.buildings[id]);
       if (this.roofs.size >= 80) this.roofs.delete(this.roofs.keys().next().value as number);
     } else this.roofs.delete(id);
     this.roofs.set(id, r);
@@ -170,6 +171,9 @@ export class Renderer {
         }
       }
 
+    // 1b) vida no chão: tufos, flores silvestres, pedrinhas, grama invadindo calçadas e asfalto
+    this.groundDecor(ctx, x0, y0);
+
     // 2) decalques
     const minX = x0 * TILE - 24;
     const maxX = (x0 + CHUNK) * TILE + 24;
@@ -190,7 +194,7 @@ export class Renderer {
     ctx.globalAlpha = 0.24;
     ctx.drawImage(mask, x0 * TILE - 16, y0 * TILE - 16);
     ctx.globalAlpha = 1;
-    for (const tr of w.trees) if (tr.x > minX - 20 && tr.x < maxX + 20 && tr.y > minY - 20 && tr.y < maxY + 20) drawTreeShadow(ctx, tr);
+    for (const tr of w.trees) if (tr.x > minX - 20 && tr.x < maxX + 20 && tr.y > minY - 20 && tr.y < maxY + 20) drawTreeShadow3q(ctx, tr);
 
     // 4) paredes, janelas, cercas, sebes, entulho
     for (let y = y0; y < y0 + CHUNK; y++)
@@ -285,40 +289,69 @@ export class Renderer {
             for (let i = 0; i < 6; i++) ctx.fillRect(px + 2 + ((i * 5) % 12), py + 3 + ((i * 7) % 10), 1, 1);
           }
         } else if (t === T.FENCE_WOOD || t === T.FENCE_METAL) {
+          // cerca em 3/4: tábuas/hastes com altura, sombra no chão
           const same = (dx: number, dy: number) => map.get(x + dx, y + dy) === t;
           const metal = t === T.FENCE_METAL;
-          ctx.fillStyle = 'rgba(0,0,0,0.22)';
-          ctx.fillRect(px + 7, py + 9, 4, 4);
-          ctx.fillStyle = metal ? '#7e817e' : '#6d5a3d';
-          const lw = metal ? 1 : 2;
-          if (same(1, 0)) ctx.fillRect(px + 8, py + 7, 8, lw);
-          if (same(-1, 0)) ctx.fillRect(px, py + 7, 8, lw);
-          if (same(0, 1)) ctx.fillRect(px + 7, py + 8, lw, 8);
-          if (same(0, -1)) ctx.fillRect(px + 7, py, lw, 8);
-          if (metal) {
-            ctx.fillStyle = 'rgba(150,154,150,0.35)';
-            if (same(1, 0) || same(-1, 0)) for (let i = 0; i < TILE; i += 2) ctx.fillRect(px + i, py + 5 + (i % 4 === 0 ? 0 : 1), 1, 4);
-            else for (let i = 0; i < TILE; i += 2) ctx.fillRect(px + 5 + (i % 4 === 0 ? 0 : 1), py + i, 4, 1);
+          const horiz = same(1, 0) || same(-1, 0) || !(same(0, 1) || same(0, -1));
+          const post = metal ? '#5c6064' : '#6e5236';
+          const board = metal ? '#8a8e8e' : '#a07a50';
+          const dark = metal ? '#3e4244' : '#4a3422';
+          ctx.fillStyle = 'rgba(16,24,12,0.25)';
+          if (horiz) ctx.fillRect(px, py + 10, TILE, 3);
+          else ctx.fillRect(px + 9, py, 3, TILE);
+          if (horiz) {
+            if (metal) {
+              ctx.fillStyle = dark;
+              ctx.fillRect(px, py - 1, TILE, 1);
+              ctx.fillRect(px, py + 9, TILE, 1);
+              ctx.fillStyle = 'rgba(150,156,156,0.55)';
+              for (let i = 0; i < TILE; i += 2) ctx.fillRect(px + i, py, 1, 9);
+            } else {
+              for (let i = 0; i < 4; i++) {
+                const bx = px + i * 4;
+                const hgt = 11 - (hash2(x * 4 + i, y) % 3 === 0 ? 2 : 0);
+                ctx.fillStyle = dark;
+                ctx.fillRect(bx, py + 10 - hgt, 3.5, hgt);
+                ctx.fillStyle = board;
+                ctx.fillRect(bx + 0.5, py + 10.5 - hgt, 2.5, hgt - 1);
+                ctx.fillStyle = 'rgba(255,240,210,0.18)';
+                ctx.fillRect(bx + 0.5, py + 10.5 - hgt, 1, hgt - 1);
+              }
+              ctx.fillStyle = dark;
+              ctx.fillRect(px, py + 3, TILE, 1.5);
+              ctx.fillRect(px, py + 7, TILE, 1.5);
+            }
           } else {
-            ctx.fillStyle = '#5e4c33';
-            if (same(1, 0) || same(-1, 0)) ctx.fillRect(px, py + 10, TILE, 1.5);
-            else ctx.fillRect(px + 10, py, 1.5, TILE);
+            ctx.fillStyle = dark;
+            ctx.fillRect(px + 6, py - 4, 4, TILE + 4);
+            ctx.fillStyle = metal ? 'rgba(150,156,156,0.7)' : board;
+            ctx.fillRect(px + 6.5, py - 3.5, 3, TILE + 3);
           }
-          ctx.fillStyle = metal ? '#5a5c5e' : '#4e3a28';
-          ctx.fillRect(px + 6.5, py + 6.5, 3, 3);
+          if (!same(-1, 0) || (x + y) % 3 === 0) {
+            ctx.fillStyle = dark;
+            ctx.fillRect(px + (horiz ? 0 : 6), py - 3, 3, 14);
+            ctx.fillStyle = post;
+            ctx.fillRect(px + (horiz ? 0.5 : 6.5), py - 2.5, 2, 13);
+          }
         } else if (t === T.HEDGE) {
-          ctx.fillStyle = '#3b4a2f';
-          ctx.fillRect(px, py, TILE, TILE);
+          // sebe com volume: topo iluminado e face frontal sombreada
           const rr = hash2(x, y, 5);
-          for (let i = 0; i < 6; i++) {
-            ctx.fillStyle = i % 2 ? '#4d5d3a' : '#44532f';
-            ellipse(ctx, px + ((rr >> (i * 3)) & 15), py + ((rr >> (i * 2 + 1)) & 15), 3.5, 3);
+          const front = map.get(x, y + 1) !== T.HEDGE;
+          ctx.fillStyle = '#2c4422';
+          ctx.fillRect(px - 0.5, py - 5, TILE + 1, TILE + 5);
+          ctx.fillStyle = '#4a7a36';
+          ctx.fillRect(px, py - 4.5, TILE, TILE + 4);
+          for (let i = 0; i < 7; i++) {
+            ctx.fillStyle = i % 2 ? '#5e9240' : '#6aa04a';
+            ellipse(ctx, px + ((rr >> (i * 3)) & 15), py - 4 + ((rr >> (i * 2 + 1)) & 11), 3, 2.5);
           }
-          ctx.fillStyle = 'rgba(120,130,80,0.25)';
-          ellipse(ctx, px + 10, py + 4, 3, 2);
-          if (map.get(x, y + 1) !== T.HEDGE) {
-            ctx.fillStyle = 'rgba(0,0,0,0.25)';
-            ctx.fillRect(px, py + 13, TILE, 3);
+          ctx.fillStyle = '#86b860';
+          for (let i = 0; i < 5; i++) ctx.fillRect(px + ((rr >> (i * 4)) & 15), py - 4 + ((rr >> (i + 3)) & 7), 1, 1);
+          if (front) {
+            ctx.fillStyle = '#365a28';
+            ctx.fillRect(px, py + 8, TILE, 8);
+            ctx.fillStyle = '#2a4420';
+            ctx.fillRect(px, py + 14, TILE, 2);
           }
         } else if (t === T.RUBBLE) {
           const rr = hash2(x, y, 9);
@@ -472,36 +505,60 @@ export class Renderer {
       if (!inView(k.x, k.y)) continue;
       if (k.pile) {
         L.fillStyle = 'rgba(0,0,0,0.3)';
-        ellipse(L, k.x + 1, k.y + 1.5, 5, 3.5);
-        L.fillStyle = '#5a5246';
-        ellipse(L, k.x, k.y, 4.5, 3.2);
-        L.fillStyle = '#7a6a52';
+        ellipse(L, k.x + 1, k.y + 1.5, 6, 3.5);
+        L.fillStyle = '#6a6052';
+        ellipse(L, k.x, k.y, 5.5, 3.6);
+        L.fillStyle = '#8a7a62';
         L.fillRect(k.x - 3, k.y - 2, 3, 2);
-        L.fillStyle = '#4a5a62';
+        L.fillStyle = '#5a6a72';
         L.fillRect(k.x + 0.5, k.y - 1, 2.5, 2);
         continue;
       }
-      drawHuman(L, { x: k.x, y: k.y, facing: k.facing, look: k.look, walk: 0, moving: false, down: true, zombie: k.zombie, seed: hash2(Math.round(k.x), Math.round(k.y)) });
+      drawCharacter(L, { x: k.x, y: k.y - 3, facing: k.facing, look: k.look, walk: 0, moving: false, down: true, zombie: k.zombie, seed: hash2(Math.round(k.x), Math.round(k.y)) });
       if (k.isPlayer && k.container.inv.items.length) {
         // mochila/itens espalhados ao lado do próprio corpo
-        L.fillStyle = '#5a4a36';
-        L.fillRect(k.x + 5, k.y + 4, 4, 3);
+        L.fillStyle = '#1e1a16';
+        L.fillRect(k.x + 7, k.y + 1, 6, 5);
+        L.fillStyle = '#6a5a40';
+        L.fillRect(k.x + 8, k.y + 2, 4, 3);
       }
     }
 
     // ---- veículos
     for (const v of world.vehicles) if (inView(v.x, v.y, 40)) drawVehicle(L, v, world.nightFactor);
 
-    // ---- personagens (ordenados por Y)
-    const actors: Actor[] = [];
-    for (const z of world.zombies) if (inView(z.x, z.y) && (overview || this.isVisible(world, z))) actors.push(z);
-    for (const a of world.allies) if (a.state !== 'morto' && inView(a.x, a.y) && (overview || this.isVisible(world, a))) actors.push(a);
-    for (const n of world.npcs) if (n.state !== 'morto' && inView(n.x, n.y) && (overview || this.isVisible(world, n))) actors.push(n);
+    // ---- cena em profundidade: personagens, árvores e construções ordenados pela base (Y)
+    const inside = p.alive && !overview ? map.buildingAtPx(p.x, p.y) : -1;
+    const drawables: { y: number; f: () => void }[] = [];
+    const push = (y: number, f: () => void) => drawables.push({ y, f });
+    for (const z of world.zombies) if (inView(z.x, z.y, 30) && (overview || this.isVisible(world, z))) push(z.y, () => this.drawActor(L, z, world));
+    for (const a of world.allies) if (a.state !== 'morto' && inView(a.x, a.y, 30) && (overview || this.isVisible(world, a))) push(a.y, () => this.drawActor(L, a, world));
+    for (const n of world.npcs) if (n.state !== 'morto' && inView(n.x, n.y, 30) && (overview || this.isVisible(world, n))) push(n.y, () => this.drawActor(L, n, world));
     // outros sobreviventes: só aparecem se estiverem À VISTA (nenhum marcador de aliado)
-    for (const o of world.players) if (o !== p && o.alive && !o.vehicleId && inView(o.x, o.y) && (overview || this.isVisible(world, o))) actors.push(o);
-    if (p.alive && !overview && !p.vehicleId) actors.push(p);
-    actors.sort((a, b) => a.y - b.y);
-    for (const a of actors) this.drawActor(L, a, world);
+    for (const o of world.players) if (o !== p && o.alive && !o.vehicleId && inView(o.x, o.y, 30) && (overview || this.isVisible(world, o))) push(o.y, () => this.drawActor(L, o, world));
+    if (p.alive && !overview && !p.vehicleId) push(p.y, () => this.drawActor(L, p, world));
+    for (const t of world.trees) {
+      if (!inView(t.x, t.y - t.r, t.r * 3 + 20)) continue;
+      // quem está atrás da copa continua visível: a árvore fica translúcida
+      const hidden = p.alive && Math.abs(p.x - t.x) < t.r + 4 && p.y < t.y && p.y > t.y - treeTop(t) - 6;
+      push(t.y, () => drawTree(L, t, hidden ? 0.5 : 1, time));
+    }
+    for (const bd of world.buildings) {
+      const bx = bd.x * TILE;
+      const by = bd.y * TILE;
+      const bw = bd.w * TILE;
+      const bh = bd.h * TILE;
+      // dentro: telhado e fachada somem; atrás do prédio: ficam translúcidos para não esconder o jogador
+      const behind = p.alive && !overview && inside !== bd.id && p.x > bx - 4 && p.x < bx + bw + 4 && p.y < by + bh && p.y > by - ROOF_RISE - 1;
+      const target = bd.id === inside ? 0 : behind ? 0.55 : 1;
+      this.roofAlpha[bd.id] += (target - this.roofAlpha[bd.id]) * 0.15;
+      const al = this.roofAlpha[bd.id];
+      if (al < 0.02) continue;
+      if (!inView(bx + bw / 2, by + bh / 2, Math.max(bw, bh) / 2 + 40)) continue;
+      push(by + bh - 0.5, () => this.drawBuilding(L, world, bd, al));
+    }
+    drawables.sort((a2, b2) => a2.y - b2.y);
+    for (const d of drawables) d.f();
 
     // ---- partículas e traçantes
     for (const pt of world.particles) {
@@ -515,31 +572,33 @@ export class Renderer {
       L.strokeStyle = `rgba(255,232,170,${tr.t / 0.07})`;
       L.lineWidth = 0.8;
       L.beginPath();
-      L.moveTo(tr.x1, tr.y1);
-      L.lineTo(tr.x2, tr.y2);
+      L.moveTo(tr.x1, tr.y1 - 12);
+      L.lineTo(tr.x2, tr.y2 - 12);
       L.stroke();
     }
     if (p.alive && p.muzzleT > 0) {
-      const mx = p.x + Math.cos(p.facing) * 12;
-      const my = p.y + Math.sin(p.facing) * 12;
+      const mx = p.x + Math.cos(p.facing) * 11;
+      const my = p.y - 10 + Math.sin(p.facing) * 9;
       L.fillStyle = 'rgba(255,230,160,0.95)';
       ellipse(L, mx, my, 3, 2.2);
       L.fillStyle = 'rgba(255,255,230,1)';
       ellipse(L, mx, my, 1.4, 1.2);
     }
 
-    // ---- neblina de visão (o que o personagem não vê)
+    // ---- neblina de visão: escurece de leve o chão que o personagem não vê
+    // (telhados e copas ficam fora da neblina; o que está escondido simplesmente não é desenhado)
     if (!overview) {
       const F = this.fctx;
       F.setTransform(1, 0, 0, 1, 0, 0);
       F.globalCompositeOperation = 'source-over';
       F.clearRect(0, 0, this.lowW, this.lowH);
-      F.fillStyle = p.alive ? 'rgba(7,9,13,0.62)' : 'rgba(7,9,13,0.35)';
+      const night = world.nightFactor;
+      F.fillStyle = p.alive ? `rgba(16,20,30,${0.2 + 0.25 * night})` : 'rgba(16,20,30,0.15)';
       F.fillRect(0, 0, this.lowW, this.lowH);
       if (p.alive) {
         F.globalCompositeOperation = 'destination-out';
         F.translate(-left, -top);
-        F.filter = 'blur(1.5px)';
+        F.filter = 'blur(3px)';
         F.fillStyle = '#000';
         F.beginPath();
         const poly = this.visPoly;
@@ -548,37 +607,20 @@ export class Renderer {
         F.closePath();
         F.fill();
         F.filter = 'none';
+        for (const bd of world.buildings) {
+          const al = this.roofAlpha[bd.id];
+          if (al < 0.5) continue;
+          const bx = bd.x * TILE;
+          const by = bd.y * TILE;
+          if (!inView(bx + (bd.w * TILE) / 2, by + (bd.h * TILE) / 2, Math.max(bd.w, bd.h) * TILE)) continue;
+          F.fillRect(bx, by - ROOF_RISE, bd.w * TILE, bd.h * TILE + ROOF_RISE);
+        }
         F.setTransform(1, 0, 0, 1, 0, 0);
         F.globalCompositeOperation = 'source-over';
       }
       L.setTransform(1, 0, 0, 1, 0, 0);
       L.drawImage(this.fog, 0, 0);
       L.translate(-left, -top);
-    }
-
-    // ---- copas de árvores
-    for (const t of world.trees) {
-      if (!inView(t.x, t.y, 30)) continue;
-      const under = p.alive && Math.hypot(p.x - t.x, p.y - t.y) < t.r;
-      drawCanopy(L, t, under ? 0.45 : 0.95, time);
-    }
-
-    // ---- telhados (somem quando o jogador entra no edifício)
-    const inside = p.alive && !overview ? map.buildingAtPx(p.x, p.y) : -1;
-    for (const b of world.buildings) {
-      const target = b.id === inside ? 0 : 1;
-      this.roofAlpha[b.id] += (target - this.roofAlpha[b.id]) * 0.15;
-      const a = this.roofAlpha[b.id];
-      if (a < 0.02) continue;
-      const bx = b.x * TILE;
-      const by = b.y * TILE;
-      if (!inView(bx + (b.w * TILE) / 2, by + (b.h * TILE) / 2, Math.max(b.w, b.h) * TILE)) continue;
-      L.globalAlpha = a * 0.4;
-      L.fillStyle = '#000';
-      L.fillRect(bx + 4, by + 6, b.w * TILE, b.h * TILE);
-      L.globalAlpha = a;
-      L.drawImage(this.roof(b.id), bx, by);
-      L.globalAlpha = 1;
     }
 
     // ---- iluminação (amanhecer + escuridão interna + fontes de luz)
@@ -634,6 +676,157 @@ export class Renderer {
     this.frameMs = this.frameMs * 0.92 + ms * 0.08;
   }
 
+  private styles = new Map<number, ReturnType<typeof facadeStyle>>();
+
+  /** Telhado + fachada (em cache) e, por cima, portas e janelas no estado atual do mapa. */
+  private drawBuilding(L: Ctx, world: World, b: World['buildings'][number], alpha: number) {
+    const bx = b.x * TILE;
+    const by = b.y * TILE;
+    L.globalAlpha = alpha * 0.35;
+    L.fillStyle = '#10140c';
+    L.fillRect(bx + 4, by + b.h * TILE - 3, b.w * TILE, 5); // sombra no chão à frente
+    L.globalAlpha = alpha;
+    L.drawImage(this.roof(b.id), bx, by - ROOF_RISE);
+    let st = this.styles.get(b.id);
+    if (!st) this.styles.set(b.id, (st = facadeStyle(b)));
+    const row = b.y + b.h - 1;
+    const fy = by + b.h * TILE - FACADE_H;
+    const map = world.map;
+    for (let x = b.x; x < b.x + b.w; x++) {
+      const t = map.get(x, row);
+      const d = map.doorAt(x, row);
+      if (d) drawFacadeDoor(L, x * TILE, fy + 11, d.open, d.broken, st.trim, d.barricades);
+      else if (t === T.WINDOW) drawFacadeWindow(L, x * TILE, fy + 6, 'ok', st.trim);
+      else if (t === T.WINDOW_BROKEN) drawFacadeWindow(L, x * TILE, fy + 6, 'quebrada', st.trim);
+      else if (t === T.WINDOW_BOARDED) drawFacadeWindow(L, x * TILE, fy + 6, 'tabuas', st.trim);
+    }
+    L.globalAlpha = 1;
+  }
+
+  /** Detalhes de chão por tile (determinísticos): o mundo parece vivo mesmo abandonado. */
+  private groundDecor(ctx: Ctx, x0: number, y0: number) {
+    const map = this.world!.map;
+    const isGreen = (t: number) => t === T.GRASS || t === T.GRASS_TALL;
+    const hard = (t: number) => t === T.ROCK || t === T.SIDEWALK || t === T.SIDEWALK_WEEDS || t === T.ASPHALT || t === T.ASPHALT_CRACK || t === T.DIRT || t === T.GRAVEL || t === T.PARKING;
+    const FLOWERS = ['#e8d070', '#e8e4dc', '#c87aa0', '#8aa0e0', '#e09050'];
+    // manchas grandes e suaves de cor (quebram a repetição dos tiles)
+    ctx.save();
+    ctx.beginPath();
+    let any = false;
+    for (let y = y0; y < y0 + CHUNK; y++)
+      for (let x = x0; x < x0 + CHUNK; x++)
+        if (map.inb(x, y) && isGreen(map.get(x, y))) {
+          ctx.rect(x * TILE, y * TILE, TILE, TILE);
+          any = true;
+        }
+    if (any) {
+      ctx.clip();
+      const rr = new RNG(x0 * 7919 + y0 * 104729);
+      for (let i = 0; i < 10; i++) {
+        const k = rr.next();
+        ctx.fillStyle = k < 0.4 ? 'rgba(150,170,80,0.10)' : k < 0.75 ? 'rgba(40,70,30,0.10)' : 'rgba(170,150,90,0.10)';
+        ellipse(ctx, x0 * TILE + rr.range(-20, CHUNK * TILE + 20), y0 * TILE + rr.range(-20, CHUNK * TILE + 20), rr.range(18, 48), rr.range(14, 36));
+      }
+    }
+    ctx.restore();
+    for (let y = y0; y < y0 + CHUNK; y++)
+      for (let x = x0; x < x0 + CHUNK; x++) {
+        if (!map.inb(x, y)) continue;
+        const t = map.get(x, y);
+        const h = hash2(x, y, 41);
+        const px = x * TILE;
+        const py = y * TILE;
+        if (t === T.DIRT || t === T.SAND) {
+          // cantos arredondados onde a terra encontra a grama (manchas orgânicas, não quadrados)
+          const g = (dx: number, dy: number) => isGreen(map.get(x + dx, y + dy));
+          ctx.fillStyle = '#607e3e';
+          const R = 6;
+          if (g(-1, 0) && g(0, -1)) this.corner(ctx, px, py, R, 0);
+          if (g(1, 0) && g(0, -1)) this.corner(ctx, px + TILE, py, R, 1);
+          if (g(-1, 0) && g(0, 1)) this.corner(ctx, px, py + TILE, R, 2);
+          if (g(1, 0) && g(0, 1)) this.corner(ctx, px + TILE, py + TILE, R, 3);
+        } else if (t === T.ROCK && map.get(x, y + 1) !== T.ROCK && !TILES[map.get(x, y + 1)].wall) {
+          // face do penhasco virada para o sul
+          ctx.fillStyle = '#5e5850';
+          ctx.fillRect(px, py + 10, TILE, 6);
+          ctx.fillStyle = '#48433c';
+          ctx.fillRect(px, py + 14, TILE, 2);
+          ctx.fillStyle = '#7a7268';
+          for (let i = 0; i < 3; i++) ctx.fillRect(px + ((h >> (i * 3)) & 13), py + 11, 2, 1);
+        }
+        if (isGreen(t)) {
+          const k = h % 100;
+          if (k < 7) {
+            // flores silvestres
+            const c = FLOWERS[(h >> 7) % FLOWERS.length];
+            for (let i = 0; i < 4; i++) {
+              const fx = px + ((h >> (i * 3)) & 13) + 1;
+              const fy2 = py + ((h >> (i * 2 + 5)) & 13) + 1;
+              ctx.fillStyle = '#4a7a34';
+              ctx.fillRect(fx, fy2 + 1, 1, 1);
+              ctx.fillStyle = c;
+              ctx.fillRect(fx, fy2, 1, 1);
+            }
+          } else if (k < 24 || t === T.GRASS_TALL) {
+            // tufos de capim
+            const n = t === T.GRASS_TALL ? 3 : 1;
+            for (let i = 0; i < n; i++) {
+              const gx = px + ((h >> (i * 4 + 2)) & 11) + 2;
+              const gy = py + ((h >> (i * 3 + 6)) & 9) + 5;
+              const dry = ((h >> (i + 9)) & 7) === 0;
+              ctx.fillStyle = dry ? '#a89a5a' : '#5e8a3e';
+              ctx.fillRect(gx, gy - 3, 1, 3);
+              ctx.fillRect(gx + 2, gy - 2, 1, 2);
+              ctx.fillStyle = dry ? '#c8b874' : '#7eaa52';
+              ctx.fillRect(gx + 1, gy - 4, 1, 4);
+            }
+          } else if (k < 27) {
+            ctx.fillStyle = '#8a867a';
+            ctx.fillRect(px + (h & 11) + 2, py + ((h >> 4) & 11) + 2, 2, 1);
+            ctx.fillStyle = '#b0aa9a';
+            ctx.fillRect(px + (h & 11) + 2, py + ((h >> 4) & 11) + 1, 2, 1);
+          }
+          // grama invadindo as bordas de calçadas e ruas
+          for (const [dx, dy] of [
+            [0, 1],
+            [0, -1],
+            [1, 0],
+            [-1, 0],
+          ]) {
+            if (!hard(map.get(x + dx, y + dy))) continue;
+            ctx.fillStyle = '#6a9a44';
+            for (let i = 0; i < 6; i++) {
+              const o = ((h >> (i * 2)) & 15) as number;
+              const d2 = 1 + ((h >> (i + 3)) & 1);
+              if (dx === 0) ctx.fillRect(px + o, dy > 0 ? py + TILE : py - d2, 1, d2);
+              else ctx.fillRect(dx > 0 ? px + TILE : px - d2, py + o, d2, 1);
+            }
+          }
+        } else if ((t === T.SIDEWALK || t === T.ASPHALT_CRACK || t === T.PARKING) && h % 100 < 9) {
+          // mato nascendo nas rachaduras
+          const gx = px + (h & 11) + 2;
+          const gy = py + ((h >> 4) & 11) + 3;
+          ctx.fillStyle = '#5e8a3e';
+          ctx.fillRect(gx, gy - 2, 1, 2);
+          ctx.fillRect(gx + 2, gy - 1, 1, 1);
+          ctx.fillStyle = '#86b058';
+          ctx.fillRect(gx + 1, gy - 3, 1, 3);
+        }
+      }
+  }
+
+  /** Preenche um canto de tile com um quarto de círculo "côncavo" (arredonda manchas). */
+  private corner(ctx: Ctx, cx: number, cy: number, R: number, q: number) {
+    const sx = q === 0 || q === 2 ? 1 : -1;
+    const sy = q === 0 || q === 1 ? 1 : -1;
+    for (let i = 0; i < R; i++)
+      for (let j = 0; j < R; j++) {
+        const dx = R - i - 0.5;
+        const dy = R - j - 0.5;
+        if (dx * dx + dy * dy > R * R) ctx.fillRect(sx > 0 ? cx + i : cx - i - 1, sy > 0 ? cy + j : cy - j - 1, 1, 1);
+      }
+  }
+
   private lampFlicker(seed: number, time: number) {
     const n = Math.sin(time * 13 + seed) * Math.sin(time * 3.1 + seed * 0.3);
     if (Math.sin(time * 0.7 + seed) > 0.93) return 0.1;
@@ -648,15 +841,16 @@ export class Renderer {
     C.clearRect(0, 0, this.lowW, this.lowH);
     const night = world.nightFactor;
     const wx = world.weather;
-    const amb = Math.min(0.82, 0.18 + 0.56 * night + 0.08 * wx.rain + 0.05 * wx.fog);
-    C.fillStyle = `rgba(${Math.round(20 - 10 * night)},${Math.round(24 - 8 * night)},${Math.round(44 + 6 * night)},${amb})`;
+    // dia claro e legível; noite escura mas compreensível (luar azulado), nunca preta
+    const amb = Math.min(0.66, 0.02 + 0.6 * night + 0.1 * wx.rain + 0.05 * wx.fog);
+    C.fillStyle = `rgba(${Math.round(24 - 10 * night)},${Math.round(30 - 8 * night)},${Math.round(56 + 10 * night)},${amb})`;
     C.fillRect(0, 0, this.lowW, this.lowH);
     C.translate(-left, -top);
     // interiores são mais escuros (luz só pelas janelas e portas)
     for (const b of world.buildings) {
       const a = 1 - this.roofAlpha[b.id];
       if (a < 0.02) continue;
-      C.fillStyle = `rgba(4,5,10,${0.36 * a})`;
+      C.fillStyle = `rgba(10,10,18,${0.18 * a})`;
       C.fillRect(b.x * TILE, b.y * TILE, b.w * TILE, b.h * TILE);
     }
     C.globalCompositeOperation = 'destination-out';
@@ -667,7 +861,7 @@ export class Renderer {
       C.fillStyle = g;
       C.fillRect(x - r, y - r, r * 2, r * 2);
     };
-    if (p.alive && !overview) radial(p.x, p.y, (inside >= 0 ? 72 : 48) * (1 - 0.35 * night), inside >= 0 ? 0.6 : 0.4 + 0.25 * night);
+    if (p.alive && !overview) radial(p.x, p.y - 8, (inside >= 0 ? 80 : 70) * (1 - 0.2 * night), inside >= 0 ? 0.6 : 0.35 + 0.3 * night);
     // faróis da caminhonete (cone de luz à frente)
     for (const v of world.vehicles) {
       if (!v.engineOn) continue;
@@ -728,21 +922,21 @@ export class Renderer {
     const morning = hr < 12;
     L.globalCompositeOperation = 'soft-light';
     const g = morning ? L.createLinearGradient(W, 0, 0, H) : L.createLinearGradient(0, 0, W, H);
-    g.addColorStop(0, `rgba(255,170,110,${0.15 + 0.4 * Math.max(0, golden)})`);
-    g.addColorStop(0.55, 'rgba(150,140,130,0.15)');
-    g.addColorStop(1, `rgba(60,80,120,${0.3 + 0.3 * world.nightFactor})`);
+    g.addColorStop(0, `rgba(255,214,150,${0.12 + 0.4 * Math.max(0, golden)})`);
+    g.addColorStop(0.55, 'rgba(160,150,130,0.04)');
+    g.addColorStop(1, `rgba(60,80,120,${0.06 + 0.3 * world.nightFactor})`);
     L.fillStyle = g;
     L.fillRect(0, 0, W, H);
     this.weatherFx(world);
     // dessaturação leve (paleta pós-apocalíptica)
     L.globalCompositeOperation = 'saturation';
-    L.fillStyle = 'rgba(128,128,128,0.18)';
+    L.fillStyle = 'rgba(128,128,128,0.06)';
     L.fillRect(0, 0, W, H);
     L.globalCompositeOperation = 'source-over';
     // vinheta
     const v = L.createRadialGradient(W / 2, H / 2, Math.min(W, H) * 0.35, W / 2, H / 2, Math.max(W, H) * 0.72);
     v.addColorStop(0, 'rgba(0,0,0,0)');
-    v.addColorStop(1, 'rgba(0,0,0,0.42)');
+    v.addColorStop(1, `rgba(0,0,0,${0.18 + 0.2 * world.nightFactor})`);
     L.fillStyle = v;
     L.fillRect(0, 0, W, H);
     if (!p.alive) return;
@@ -813,7 +1007,7 @@ export class Renderer {
   }
 
   private drawActor(L: Ctx, a: Actor, world: World) {
-    const base: HumanPose = {
+    const base: CharPose = {
       x: a.x,
       y: a.y,
       facing: a.facing,
@@ -825,9 +1019,10 @@ export class Renderer {
       seed: hash2(a.id.length, a.id.charCodeAt(1) || 0, a.id.length > 2 ? a.id.charCodeAt(2) : 0),
     };
     if (a instanceof Zombie) {
-      drawHuman(L, {
+      drawCharacter(L, {
         ...base,
         zombie: true,
+        run: a.ztype === 'rapido' && a.moving && (a.state === 'perseguir' || a.state === 'atacar'),
         crawler: a.crawler,
         down: a.knockedDown > 0,
         reach: a.state === 'perseguir' || a.state === 'atacar' || (a.state === 'identificar' && a.stateT > 0.2),
@@ -839,7 +1034,7 @@ export class Renderer {
       const wit = a.inv.get(a.weaponUid);
       const wd = wit ? itemDef(wit.defId).weapon : null;
       const isNpc = a.state === 'npc';
-      drawHuman(L, { ...base, weapon: wd ? (wd.kind === 'gun' ? 'gun' : 'melee') : isNpc ? 'none' : 'melee', weaponLen: wd?.length ?? 10, weaponColor: '#6a6e70' });
+      drawCharacter(L, { ...base, run: Math.hypot(a.vx, a.vy) > 60, backpack: a.state === 'npc' && (a as unknown as { role?: string }).role === 'sobrevivente' ? '#5a5a3a' : null, weapon: wd ? (wd.kind === 'gun' ? 'gun' : 'melee') : isNpc ? 'none' : 'melee', weaponLen: wd?.length ?? 10, weaponColor: '#6a6e70' });
       return;
     }
     if (a instanceof Player) {
@@ -847,8 +1042,9 @@ export class Renderer {
       const d = it ? itemDef(it.defId) : null;
       const wk = d?.weapon?.kind === 'gun' ? 'gun' : d?.weapon?.kind === 'melee' ? 'melee' : 'none';
       const bag = a.item('costas');
-      drawHuman(L, {
+      drawCharacter(L, {
         ...base,
+        run: a.running && a.moving,
         crouch: a.crouch,
         down: a.isDown || !!a.sleep,
         weapon: wk,

@@ -243,6 +243,32 @@ export class Game implements UIHost {
     this.world.msg('Dica: [E] interage, [I] abre o inventário, [Esc] mostra os controles.', 'info');
   }
 
+  /**
+   * Área demonstrativa da nova direção visual: casa detalhada, rua, calçadas, árvores,
+   * arbustos, cercas, personagem animado, dois infectados, veículo abandonado, luz do dia.
+   * É o jogo de verdade (mesmos sistemas), só que num recorte calmo do bairro.
+   */
+  startDemo() {
+    this.startGame();
+    const w = this.world;
+    const p = w.player;
+    // 10h da manhã, céu limpo
+    const target = 10 * 60;
+    w.time += (((target - (w.gameMinutes % 1440)) + 1440) % 1440) / CONFIG.time.minutesPerSecond;
+    w.weather.set('limpo', 999, true);
+    w.weather.locked = true;
+    p.x = 12 * TILE + 8;
+    p.y = 27 * TILE + 8;
+    p.facing = Math.PI / 2;
+    p.hunger = p.thirst = p.fatigue = 5;
+    // recorte calmo: só dois infectados vagando pela rua
+    w.zombies = w.zombies.filter((z) => Math.hypot(z.x - p.x, z.y - p.y) > 45 * TILE);
+    w.spawnZombie(4 * TILE + 8, 38 * TILE + 8, 'comum', 'civil');
+    w.spawnZombie(27 * TILE + 8, 39 * TILE + 8, 'comum', 'civil');
+    this.camera.follow(p.x, p.y, 0, true);
+    w.msg('Área demonstrativa da nova direção visual: casa, rua, calçadas, árvores, cercas, dois infectados e um carro abandonado. Tudo jogável.', 'good');
+  }
+
   resume() {
     if (this.state !== 'paused') return;
     this.state = this.world.player.alive ? 'playing' : 'dead';

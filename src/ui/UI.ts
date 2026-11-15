@@ -22,6 +22,7 @@ import { Panels, PANEL_CSS } from './Panels';
 export interface UIHost {
   readonly world: World;
   startGame(): void;
+  startDemo(): void;
   continueGame(): void;
   saveGame(): boolean;
   loadGame(): void;
@@ -176,7 +177,7 @@ export class UI {
       <div class="card">
         <div class="sub">Etapas 1–5 · Sobrevivência cooperativa</div>
         <h1>O Último<br>Amanhecer</h1>
-        <div class="btns"><button class="btn primary hidden" data-a="continue">Continuar partida</button><button class="btn" data-a="start">Novo mundo — SOLO (offline)</button><button class="btn" data-a="multi">Multijogador (1–4)</button><button class="btn" data-a="controls">Controles</button></div>
+        <div class="btns"><button class="btn primary hidden" data-a="continue">Continuar partida</button><button class="btn" data-a="start">Novo mundo — SOLO (offline)</button><button class="btn" data-a="multi">Multijogador (1–4)</button><button class="btn" data-a="demo">Área demonstrativa (visual)</button><button class="btn" data-a="controls">Controles</button></div>
         <div class="foot hidden" data-k="saveinfo"></div>
         <div class="hidden" data-k="lobby" style="margin-top:10px;display:flex;flex-direction:column;gap:6px"></div>
         <div class="controls hidden" data-k="controls">${CONTROLS.map(([k, v]) => `<span class="kbd">${k}</span><span>${v}</span>`).join('')}</div>
@@ -187,6 +188,7 @@ export class UI {
     this.title.addEventListener('click', (e) => {
       const a = (e.target as HTMLElement).dataset.a;
       if (a === 'start') this.host.startGame();
+      if (a === 'demo') this.host.startDemo();
       if (a === 'continue') this.host.continueGame();
       if (a === 'controls') this.title.querySelector('[data-k=controls]')!.classList.toggle('hidden');
       if (a === 'multi') this.showLobby(null, '');

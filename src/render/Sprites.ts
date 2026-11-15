@@ -353,8 +353,19 @@ export function drawDoor(ctx: Ctx, d: Door) {
 export function drawVehicle(ctx: Ctx, v: Vehicle, night: number) {
   const L = v.def.length;
   const W = v.def.width;
+  // volume em 3/4: silhueta escura (laterais) no chão e carroceria elevada 4 px
   ctx.save();
   ctx.translate(v.x, v.y);
+  ctx.rotate(v.angle);
+  ctx.fillStyle = 'rgba(16,20,12,0.35)';
+  roundRect(ctx, -L / 2 + 2, -W / 2 + 2, L, W, 5);
+  ctx.fill();
+  ctx.fillStyle = shadeHex(v.def.color ?? '#5a6a4a', -0.35);
+  roundRect(ctx, -L / 2, -W / 2, L, W, 5);
+  ctx.fill();
+  ctx.restore();
+  ctx.save();
+  ctx.translate(v.x, v.y - 4);
   ctx.rotate(v.angle);
   ctx.fillStyle = 'rgba(0,0,0,0.35)';
   roundRect(ctx, -L / 2 + 3, -W / 2 + 3, L, W, 5);
@@ -946,24 +957,22 @@ export function drawProp(ctx: Ctx, p: Prop) {
       break;
     }
     case 'lamp': {
-      // poste visto de cima: base, braço e luminária (sombra longa projetada pelo sol nascente)
-      ctx.fillStyle = 'rgba(0,0,0,0.28)';
-      ctx.save();
-      ctx.translate(x + 8, y + 8);
-      ctx.rotate(2.6);
-      ctx.fillRect(0, -1, 26, 2);
-      ctx.restore();
-      ctx.fillStyle = '#2e3032';
-      ellipse(ctx, x + 8, y + 8, 2.6, 2.6);
-      ctx.fillStyle = '#55585a';
-      ellipse(ctx, x + 8, y + 8, 1.5, 1.5);
-      ctx.fillStyle = '#44474a';
-      ctx.fillRect(x + 7.4, y - 3, 1.2, 10);
-      ctx.fillStyle = '#6a6c6a';
-      roundRect(ctx, x + 5, y - 6, 6, 4, 1.5);
-      ctx.fill();
-      ctx.fillStyle = '#8f8c80';
-      ctx.fillRect(x + 6, y - 5, 4, 1.5);
+      // poste em 3/4: base no chão, haste alta e luminária (sombra curta, sol alto)
+      ctx.fillStyle = 'rgba(16,20,12,0.28)';
+      ctx.fillRect(x + 8, y + 9, 12, 2);
+      ctx.fillStyle = '#26282a';
+      ctx.fillRect(x + 5.5, y + 7, 5, 4);
+      ctx.fillStyle = '#4a4e52';
+      ctx.fillRect(x + 6.5, y + 7, 3, 3);
+      ctx.fillStyle = '#26282a';
+      ctx.fillRect(x + 6.5, y - 22, 3, 30);
+      ctx.fillStyle = '#5e6266';
+      ctx.fillRect(x + 7, y - 22, 1.2, 30);
+      ctx.fillStyle = '#26282a';
+      ctx.fillRect(x + 7, y - 24, 10, 3);
+      ctx.fillRect(x + 13, y - 24, 6, 5);
+      ctx.fillStyle = '#d8d2b0';
+      ctx.fillRect(x + 14, y - 20, 4, 1.5);
       break;
     }
     case 'fuel_tank': {
@@ -1081,7 +1090,29 @@ function drawCar(ctx: Ctx, p: Prop, r: RNG) {
   const y = p.y * TILE;
   const w = p.w * TILE;
   const h = p.h * TILE;
+  // volume em 3/4: lateral da carroceria visível embaixo, carroceria elevada
+  const body0 = p.burned ? '#2a2826' : p.color ?? '#6d3b33';
+  ctx.fillStyle = 'rgba(16,20,12,0.35)';
+  roundRect(ctx, x + 3, y + 4, w - 2, h - 2, 4);
+  ctx.fill();
+  ctx.fillStyle = '#18181a';
+  roundRect(ctx, x + 0.5, y + 2, w - 1, h - 1, 4);
+  ctx.fill();
+  ctx.fillStyle = shadeHex(body0, -0.32);
+  roundRect(ctx, x + 1, y + 1.5, w - 2, h - 3, 4);
+  ctx.fill();
+  ctx.fillStyle = '#0e0e10';
+  if (p.vertical) {
+    ctx.fillRect(x + 1, y + h * 0.18, 2, 5);
+    ctx.fillRect(x + w - 3, y + h * 0.18, 2, 5);
+    ctx.fillRect(x + 1, y + h * 0.72, 2, 5);
+    ctx.fillRect(x + w - 3, y + h * 0.72, 2, 5);
+  } else {
+    ctx.fillRect(x + w * 0.16, y + h - 3, 6, 3);
+    ctx.fillRect(x + w * 0.74, y + h - 3, 6, 3);
+  }
   ctx.save();
+  ctx.translate(0, -4);
   // desenha sempre na horizontal e gira se for vertical
   if (p.vertical) {
     ctx.translate(x + w, y);

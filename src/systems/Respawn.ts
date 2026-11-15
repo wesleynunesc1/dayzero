@@ -18,7 +18,9 @@ export function handlePlayerDeath(world: World) {
   const items = p.inv.items.splice(0);
   p.equipped = { arma: null, corpo: null, costas: null };
   p.refreshCapacity();
-  world.createCorpse(p.x, p.y, p.facing, { ...p.look }, 'Seu corpo', items, true, false);
+  world.createCorpse(p.x, p.y, p.facing, { ...p.look }, `Corpo de ${p.name}`, items, true, false);
+  p.captive = null;
+  world.msgNear(p.x, p.y, 30 * TILE, `${p.name} morreu.`, 'danger');
   world.addDecal({ x: p.x, y: p.y, kind: 'blood', r: 10, rot: 0, seed: 11 });
   p.deaths++;
   world.events.emit('closeContainer', {});
@@ -40,7 +42,9 @@ export function chooseRespawn(world: World, mode: RespawnMode = CONFIG.respawnMo
   const p = world.player;
   const known = world.safePoints.filter((s) => s.discovered);
   const clear = (x: number, y: number) => !zombiesWithin(world, x, y, 7 * TILE);
-  const start = world.safePoints[0];
+  // ponto inicial do próprio sobrevivente (cada um começa numa região)
+  const mine = world.starts.find((s) => s.region === p.region);
+  const start = (mine && world.safePoints.find((s) => s.id === mine.safePoint)) || world.safePoints[0];
   const ordered: RespawnPoint[] = [];
 
   if (mode === 'ultima_localizacao') {
@@ -65,7 +69,9 @@ export function respawnPlayer(world: World): RespawnPoint {
   const pt = chooseRespawn(world);
   p.x = pt.x;
   p.y = pt.y;
+  const vaccinated = p.health.vaccinated;
   p.health = new Health();
+  p.health.vaccinated = vaccinated;
   p.alive = true;
   p.stamina = CONFIG.player.staminaMax;
   p.hunger = 25;

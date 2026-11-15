@@ -101,7 +101,7 @@ export function botCommand(w: World, p: Player, dt: number, active: boolean): Pl
       } else if (td > (wd?.range ?? 14) + 6) {
         steer(cmd, p, threat.x, threat.y);
       } else {
-        cmd.attackPressed = p.attackCd <= 0;
+        cmd.attack = true; // corpo a corpo: segurar o ataque
       }
       return cmd;
     }

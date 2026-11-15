@@ -383,6 +383,7 @@ export class UI {
   }
 
   updateHud(world: World, target: Interactable | null, fpsText: string) {
+    this.panels.update(world);
     const w = world;
     const p = world.player;
     const h = p.health;

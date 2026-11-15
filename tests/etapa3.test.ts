@@ -168,9 +168,8 @@ await until(() => pA.openContainer === cont.id, 3000);
 const lootUid = cont.inv.items[0].uid;
 const rTake = await A.c.request('take', [cont.id, lootUid]);
 const looted = !cont.inv.items.some((i) => i.uid === lootUid) && pA.inv.items.some((i) => i.uid === lootUid);
-await until(() => A.st.snaps.some((s) => s.cont?.some(([id]) => id === cont.id)), 3000);
+await until(() => A.st.snaps.some((s) => s.cont?.some(([id, items]) => id === cont.id && !items.some((i) => i.uid === lootUid))), 3000);
 const clientSaw = A.st.snaps.some((s) => s.cont?.some(([id, items]) => id === cont.id && !items.some((i) => i.uid === lootUid)));
-console.log('   (7:', looted, clientSaw, rTake, ')');
 check(7, 'O mundo preserva o progresso', looted && clientSaw && rTake === null, `item ${lootUid} saiu de "${cont.name}" para o inventário de ${pA.name} pelo servidor; o cliente recebeu o recipiente atualizado (persistência após reinício: teste 23)`);
 
 // 21 ─ missões principais atualizam o progresso compartilhado
@@ -256,7 +255,6 @@ srv = startServer({ port: PORT, dataDir: DATA, quiet: true });
 await srv.ready;
 G = srv.game;
 const crashOk = G.room.started && G.world.missions!.chapter === savedChapter && G.world.players[0].inv.items.length > 0;
-console.log('   (23: reinício', restartOk, '· incremental', incr, '· queda', crashOk, ')');
 check(23, 'O servidor mantém os dados após reinicialização', restartOk && incr && crashOk,
   `capítulo ${savedChapter}, saque, inventários (Ana ${w2.players[0].inv.items.length}, Beto ${w2.players[1].inv.items.length} itens), marcação no mapa e donos de vaga preservados; 2º salvamento: ${st1.written - st0.written} seções gravadas, ${st1.skipped - st0.skipped} sem mudança; manifesto corrompido → recuperado do backup`);
 await srv.close(true);

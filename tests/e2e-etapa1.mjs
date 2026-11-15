@@ -105,9 +105,11 @@ const alerted = after.filter((a) => a.heard).length;
 const alertedNear = near.filter((b) => after.find((a) => a.id === b.id)?.heard).length;
 const shots = await ev(() => window.__oua.world.stats.shotsFired);
 ok(8, 'Disparar e atrair zumbis próximos', shots === 1 && alertedNear >= Math.min(5, near.length) && alerted >= 5, `${alerted} zumbis ouviram o disparo (${alertedNear}/${near.length} a menos de 26 tiles)`);
-const d0 = await ev(() => { const w = window.__oua.world; const p = w.player; return w.zombies.filter((z) => z.heard).reduce((s, z) => s + Math.hypot(z.x - p.x, z.y - p.y), 0) / Math.max(1, w.zombies.filter((z) => z.heard).length); });
+const heardIds = after.filter((a) => a.heard).map((a) => a.id);
+const d0 = await ev((ids) => { const w = window.__oua.world; const p = w.player; const zs = w.zombies.filter((z) => ids.includes(z.id)); return zs.reduce((s, z) => s + Math.hypot(z.x - p.x, z.y - p.y), 0) / Math.max(1, zs.length); }, heardIds);
 await ev(() => window.__oua.step(4, { aimX: window.__oua.world.player.x - 60, aimY: window.__oua.world.player.y }));
-const d1 = await ev(() => { const w = window.__oua.world; const p = w.player; return w.zombies.filter((z) => z.heard).reduce((s, z) => s + Math.hypot(z.x - p.x, z.y - p.y), 0) / Math.max(1, w.zombies.filter((z) => z.heard).length); });
+// mede os MESMOS zumbis que ouviram o disparo (o mundo maior tem outros ruídos acontecendo)
+const d1 = await ev((ids) => { const w = window.__oua.world; const p = w.player; const zs = w.zombies.filter((z) => ids.includes(z.id)); return zs.reduce((s, z) => s + Math.hypot(z.x - p.x, z.y - p.y), 0) / Math.max(1, zs.length); }, heardIds);
 ok(8, '…e eles se aproximam caminhando (sem teleporte)', d1 < d0 - 20, `distância média ${(d0/16).toFixed(1)} → ${(d1/16).toFixed(1)} tiles em 4 s`);
 await unfreeze(); await wait(500); await shot('t08-disparo'); await freeze();
 

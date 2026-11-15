@@ -138,6 +138,13 @@ export class Game implements UIHost {
       this.camera.viewH = this.renderer.viewH;
     });
     window.addEventListener('keydown', (e) => {
+      // caixa de fala/rádio abre na hora (sem esperar o próximo quadro), com o foco no campo
+      if ((e.code === 'Enter' || e.code === 'KeyT') && this.state === 'playing' && !this.ui.isModalOpen() && !e.repeat) {
+        e.preventDefault();
+        this.ui.panels.openTalk();
+        this.input.releaseAll();
+        return;
+      }
       if (e.code === 'F3') {
         this.showStats = !this.showStats;
         e.preventDefault();
@@ -309,11 +316,7 @@ export class Game implements UIHost {
       return;
     }
     if (this.state !== 'playing') return;
-    if (inp.consume('talk') && !this.ui.isModalOpen()) {
-      this.ui.panels.openTalk();
-      inp.releaseAll();
-      return;
-    }
+    inp.consume('talk'); // aberto direto no keydown (ver construtor), para não perder letras
     if (inp.consume('journal')) this.ui.panels.toggleJournal();
     const opts = ['opt1', 'opt2', 'opt3', 'opt4', 'opt5', 'opt6', 'opt7', 'opt8'] as const;
     for (let i = 0; i < opts.length; i++) if (this.ui.panels.chooseIndex(-1) && inp.consume(opts[i])) this.ui.panels.chooseIndex(i);

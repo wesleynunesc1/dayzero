@@ -91,7 +91,7 @@ export class Panels {
     this.talk.classList.remove('hidden');
     const input = this.talk.querySelector('input') as HTMLInputElement;
     input.value = '';
-    setTimeout(() => input.focus(), 0);
+    input.focus();
   }
 
   private sendTalk() {
@@ -207,7 +207,7 @@ export class Panels {
     const objs = m.objectives();
     const facs = [...w.factions.values()].map((f) => `<div class="kv"><span class="label">${esc(f.name)}</span><b>${repLabel(rep(w, f.id, p.id))} (${Math.round(rep(w, f.id, p.id))})</b></div>`).join('');
     const group = w.players
-      .map((o) => `<div class="kv"><span class="label">${esc(o.name)}${o === p ? ' (você)' : ''}</span><b>${o.controller === 'humano' ? (o.connected ? 'jogador' : 'desconectado — IA no controle') : 'IA'}${o.dead ? ' · morto' : ''}${o.captive ? ' · preso' : ''}${o !== p && !p.contacts.has(o.id) && !o.contacts.has(p.id) ? ' · sem contato' : ''}</b></div>`)
+      .map((o) => `<div class="kv"><span class="label">${esc(o.name)}${o === p ? ' (você)' : ''}</span><b>${o.controller === 'humano' && o.connected ? `jogador${o.owner ? ` (${esc(o.owner)})` : ''}` : o.owner ? `${esc(o.owner)} desconectado — IA no controle` : 'IA'}${o.dead ? ' · morto' : ''}${o.captive ? ' · preso' : ''}${o !== p && !p.contacts.has(o.id) && !o.contacts.has(p.id) ? ' · sem contato' : ''}</b></div>`)
       .join('');
     this.journal.innerHTML = `<h2>Diário — ${m.finished ? 'Campanha concluída' : `Capítulo ${m.chapter}: ${esc(m.def.title)}`}</h2>
       ${m.finished ? '' : `<div class="foot">${esc(m.def.intro)}</div>`}

@@ -40,6 +40,8 @@ export interface Snapshot {
   tracers?: World['tracers'];
   mis?: unknown;
   fac?: Record<string, { reputation: Record<string, number>; resources: Record<string, number> }>;
+  /** Situação do grupo (sem posição): quem é humano/IA, conectado, morto, preso, contatos. */
+  roster?: [string, 'humano' | 'ia', boolean, boolean, boolean, string[], string | null][];
 }
 
 /** Estado do que já foi enviado a um cliente (para mandar só diferenças). */
@@ -174,6 +176,7 @@ export function buildSnapshot(w: World, playerId: string, view: ClientView, dt: 
     }
     const m = w.missions;
     if (m) snap.mis = { chapter: m.chapter, finished: m.finished, flags: m.flags, done: [...m.done], side: m.side, log: m.log.slice(-20), lab: m.lab, rendezvous: m.rendezvous };
+    snap.roster = w.players.map((p) => [p.id, p.controller, p.connected, p.dead, !!p.captive, [...p.contacts], p.owner]);
     snap.fac = Object.fromEntries([...w.factions].map(([id, f]) => [id, { reputation: f.reputation, resources: f.resources }]));
   }
   const dec = outbox.decals.filter((d) => near(d.x, d.y));
@@ -318,6 +321,18 @@ export function applySnapshot(w: World, s: Snapshot) {
     const m = s.mis as { chapter: number; finished: boolean; flags: Record<string, boolean | number | string>; done: string[]; side: never[]; log: never[]; lab: typeof w.missions.lab; rendezvous: typeof w.missions.rendezvous };
     Object.assign(w.missions, { chapter: m.chapter, finished: m.finished, flags: m.flags, side: m.side, log: m.log, lab: m.lab, rendezvous: m.rendezvous });
     w.missions.done = new Set(m.done);
+  }
+  for (const [id, ctrl, conn, dead, captive, contacts, owner] of s.roster ?? []) {
+    const p = w.playerById(id);
+    if (!p) continue;
+    p.owner = owner;
+    p.controller = ctrl;
+    p.connected = conn;
+    if (p !== me) {
+      p.health.dead = dead;
+      p.captive = captive ? p.captive ?? { faction: '?', cell: 0, since: 0 } : null;
+    }
+    p.contacts = new Set(contacts);
   }
   for (const [id, f] of Object.entries(s.fac ?? {})) {
     const ff = w.factions.get(id);

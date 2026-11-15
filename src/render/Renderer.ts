@@ -62,6 +62,15 @@ export class Renderer {
   private visPoly: number[] = [];
   /** Tempo de renderização médio (ms). */
   frameMs = 0;
+  /** Qualidade gráfica: baixo (celular modesto), medio, alto. */
+  quality: 'baixo' | 'medio' | 'alto' = 'alto';
+  /** Escala fracionária (telas densas de celular): enquadramento igual em qualquer proporção. */
+  fractional = false;
+
+  setQuality(q: 'baixo' | 'medio' | 'alto') {
+    this.quality = q;
+    this.resize();
+  }
 
   constructor(readonly canvas: HTMLCanvasElement) {
     this.ctx = canvas.getContext('2d')!;
@@ -72,15 +81,32 @@ export class Renderer {
   }
 
   resize() {
-    this.dpr = Math.min(2, window.devicePixelRatio || 1);
-    const w = Math.floor(window.innerWidth * this.dpr);
-    const h = Math.floor(window.innerHeight * this.dpr);
+    const cw = Math.max(1, window.innerWidth);
+    const ch = Math.max(1, window.innerHeight);
+    // Enquadramento: ~17 tiles no lado menor e no máximo ~31 no maior. Telas mais largas
+    // ampliam mais em vez de revelar mais mundo (sem vantagem para quem tem tela larga).
+    const cssZoom = Math.max(Math.min(cw, ch) / 280, Math.max(cw, ch) / 500);
+    let w: number;
+    let h: number;
+    if (this.quality === 'baixo') {
+      // baixo: a cena é desenhada já no tamanho final em pixels de jogo e o navegador amplia
+      // (sem suavizar). Sem cópia grande por quadro — o modo mais leve para celulares modestos.
+      this.dpr = 1 / cssZoom;
+      this.zoom = 1;
+      w = Math.ceil(cw * this.dpr);
+      h = Math.ceil(ch * this.dpr);
+    } else {
+      this.dpr = Math.min(this.quality === 'medio' ? 1.5 : 2, window.devicePixelRatio || 1);
+      w = Math.floor(cw * this.dpr);
+      h = Math.floor(ch * this.dpr);
+      const zh = Math.min(w, h) / 280;
+      const zw = Math.max(w, h) / 500;
+      this.zoom = this.fractional ? Math.max(1, zh, zw) : Math.max(2, Math.round(zh), Math.ceil(zw - 0.15));
+    }
     this.canvas.width = w;
     this.canvas.height = h;
-    this.canvas.style.width = `${window.innerWidth}px`;
-    this.canvas.style.height = `${window.innerHeight}px`;
-    // fator inteiro para manter os pixels quadrados (~17 tiles de altura visíveis)
-    this.zoom = Math.max(2, Math.round(h / 280));
+    this.canvas.style.width = `${cw}px`;
+    this.canvas.style.height = `${ch}px`;
     this.lowW = Math.ceil(w / this.zoom) + 2;
     this.lowH = Math.ceil(h / this.zoom) + 2;
     for (const c of [this.low, this.fog, this.light]) {
@@ -561,7 +587,9 @@ export class Renderer {
     for (const d of drawables) d.f();
 
     // ---- partículas e traçantes
-    for (const pt of world.particles) {
+    const pstep = this.quality === 'baixo' ? 2 : 1;
+    for (let pi = 0; pi < world.particles.length; pi += pstep) {
+      const pt = world.particles[pi];
       if (!inView(pt.x, pt.y, 4)) continue;
       L.globalAlpha = Math.min(1, pt.life / (pt.max * 0.5));
       L.fillStyle = pt.color;
@@ -598,7 +626,7 @@ export class Renderer {
       if (p.alive) {
         F.globalCompositeOperation = 'destination-out';
         F.translate(-left, -top);
-        F.filter = 'blur(3px)';
+        if (this.quality !== 'baixo') F.filter = 'blur(3px)';
         F.fillStyle = '#000';
         F.beginPath();
         const poly = this.visPoly;
@@ -928,10 +956,12 @@ export class Renderer {
     L.fillStyle = g;
     L.fillRect(0, 0, W, H);
     this.weatherFx(world);
-    // dessaturação leve (paleta pós-apocalíptica)
-    L.globalCompositeOperation = 'saturation';
-    L.fillStyle = 'rgba(128,128,128,0.06)';
-    L.fillRect(0, 0, W, H);
+    // dessaturação leve (paleta pós-apocalíptica) — dispensável no modo baixo
+    if (this.quality !== 'baixo') {
+      L.globalCompositeOperation = 'saturation';
+      L.fillStyle = 'rgba(128,128,128,0.06)';
+      L.fillRect(0, 0, W, H);
+    }
     L.globalCompositeOperation = 'source-over';
     // vinheta
     const v = L.createRadialGradient(W / 2, H / 2, Math.min(W, H) * 0.35, W / 2, H / 2, Math.max(W, H) * 0.72);
@@ -973,7 +1003,7 @@ export class Renderer {
     if (wx.rain > 0.02) {
       L.fillStyle = `rgba(40,50,70,${0.12 * wx.rain})`;
       L.fillRect(0, 0, W, H);
-      const n = Math.floor(((W * H) / 600) * wx.rain);
+      const n = Math.floor(((W * H) / (this.quality === 'baixo' ? 1500 : 600)) * wx.rain);
       L.strokeStyle = `rgba(185,200,220,${0.5 * wx.rain})`;
       L.lineWidth = 1;
       L.beginPath();

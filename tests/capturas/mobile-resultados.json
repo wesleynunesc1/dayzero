@@ -1,0 +1,179 @@
+{
+  "results": [
+    {
+      "n": 1,
+      "name": "Android (Pixel 7 emulado): detecção de toque e início por toque",
+      "pass": true,
+      "info": "pointer:coarse=true, toques=1, qualidade padrão=medio, 863x360"
+    },
+    {
+      "n": 3,
+      "name": "Joystick virtual analógico (360°, zona morta, volta ao centro)",
+      "pass": true,
+      "info": "vel. parcial 18 → total 52 px/s; diagonal (37,37); ao soltar (0,0)"
+    },
+    {
+      "n": 4,
+      "name": "Correr (segurar) e agachar (alternar) por toque",
+      "pass": true,
+      "info": "correndo=true→false, agachado=true→false"
+    },
+    {
+      "n": 5,
+      "name": "Mirar e disparar enquanto se move (multitoque, sem mira/disparo automáticos)",
+      "pass": true,
+      "info": "pistola em mãos=true; munição 8→5 (parado: 8); andou 4.7 tiles; olhando 180°; infectado à direita intacto=true"
+    },
+    {
+      "n": 6,
+      "name": "Recarregar pelo botão",
+      "pass": true,
+      "info": "carregador 5 → 10"
+    },
+    {
+      "n": "5b",
+      "name": "Botão de golpe: troca para corpo a corpo e golpeia enquanto segura",
+      "pass": true,
+      "info": "arma agora: unarmed; fôlego 99→94 (golpes gastam fôlego)"
+    },
+    {
+      "n": 7,
+      "name": "Abrir porta pelo botão de interação contextual",
+      "pass": true,
+      "info": "botão: \"Abrir porta da frente\" → aberta=true"
+    },
+    {
+      "n": 8,
+      "name": "Entrar no imóvel andando com o joystick",
+      "pass": true,
+      "info": "dentro de: Casa 2"
+    },
+    {
+      "n": 9,
+      "name": "Vasculhar armário (interação por toque abre o recipiente)",
+      "pass": true,
+      "info": "\"Revistar armário da cozinha\" → recipiente c1"
+    },
+    {
+      "n": 10,
+      "name": "Coletar comida e água por toque",
+      "pass": true,
+      "info": "água 0→1, feijão 0→1, sobrou no armário: 0"
+    },
+    {
+      "n": 11,
+      "name": "Inventário por toque: abrir, selecionar, consumir, fechar (sem duplicar)",
+      "pass": true,
+      "info": "fechou com ✕=true, reabriu pelo 🎒=true, latas 1→0 após 3 toques rápidos, duplicatas=0"
+    },
+    {
+      "n": 12,
+      "name": "Usar item médico (bandagem) pelo inventário de toque",
+      "pass": true,
+      "info": "ferimento tratado=true, sangrando=false, bandagens restantes 1"
+    },
+    {
+      "n": 13,
+      "name": "Mapa físico: indisponível sem o item, abre com ele (sem minimapa)",
+      "pass": true,
+      "info": "sem mapa: botão desligado=true, abriu=false; com mapa: abriu=true; marcações 0→1"
+    },
+    {
+      "n": 14,
+      "name": "Rádio por toque: só aparece ativo com rádio; abre no modo rádio (sem chat global)",
+      "pass": true,
+      "info": "sem rádio: desligado=true; com rádio: caixa aberta=true, modo=radio"
+    },
+    {
+      "n": 15,
+      "name": "Dirigir por toque: entrar, acelerar, esterçar, frear e sair",
+      "pass": true,
+      "info": "\"Entrar na caminhonete\" → andou 8.1 tiles, giro 102°, freou até 0.4, \"Sair da caminhonete\" → fora=true"
+    },
+    {
+      "n": 16,
+      "name": "Consumo de combustível visível ao dirigir",
+      "pass": true,
+      "info": "gasolina 20.00 → 19.89 L; HUD: 19,9 / 60 L"
+    },
+    {
+      "n": 17,
+      "name": "Salvar pelo menu de toque e continuar após recarregar",
+      "pass": true,
+      "info": "(1586,564) → (1586,564), itens 6→6"
+    },
+    {
+      "n": 18,
+      "name": "Fechar a aba e reabrir (salvamento ao ir para segundo plano)",
+      "pass": true,
+      "info": "pausou=paused, joystick solto=true; reabriu com \"Continuar\"=true; (1580,557) → (1580,557)"
+    },
+    {
+      "n": 19,
+      "name": "Girar a tela (aviso, alternativa e enquadramento proporcional)",
+      "pass": true,
+      "info": "horizontal 500x209, vertical 209x500 (aviso=flex), ultralarga 500x164 (unid. de mundo)"
+    },
+    {
+      "n": 20,
+      "name": "Desempenho medido (emulação; não é aparelho real)",
+      "pass": true,
+      "info": "CPU normal: alto 60 fps (render 4.7 ms), medio 60 fps (render 5.4 ms), baixo 60 fps (render 3.1 ms) | CPU 4x mais lenta: alto 31 fps (render 18.1 ms), medio 41 fps (render 18.1 ms), baixo 53 fps (render 11.2 ms) | memória JS 28 MB, 496 zumbis"
+    },
+    {
+      "n": 2,
+      "name": "iPhone (perfil iPhone 14 emulado em Chromium): detecção, joystick, áreas seguras",
+      "pass": true,
+      "info": "750x340, andou 2.1 tiles, botão tela cheia: visível — Safari real: PENDENTE"
+    }
+  ],
+  "errors": [],
+  "perf": {
+    "full": {
+      "alto": {
+        "fps": 60,
+        "render": "4.7",
+        "sim": "0.43",
+        "mem": 22,
+        "z": 496
+      },
+      "medio": {
+        "fps": 60,
+        "render": "5.4",
+        "sim": "0.29",
+        "mem": 17,
+        "z": 496
+      },
+      "baixo": {
+        "fps": 60,
+        "render": "3.1",
+        "sim": "0.58",
+        "mem": 17,
+        "z": 496
+      }
+    },
+    "slow": {
+      "alto": {
+        "fps": 31,
+        "render": "18.1",
+        "sim": "1.13",
+        "mem": 17,
+        "z": 496
+      },
+      "medio": {
+        "fps": 41,
+        "render": "18.1",
+        "sim": "0.74",
+        "mem": 23,
+        "z": 496
+      },
+      "baixo": {
+        "fps": 53,
+        "render": "11.2",
+        "sim": "1.01",
+        "mem": 28,
+        "z": 496
+      }
+    }
+  }
+}

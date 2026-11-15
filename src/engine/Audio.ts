@@ -15,6 +15,11 @@ export class AudioSystem {
   volume = 0.7;
   private lastPlay = new Map<string, number>();
 
+  /** Retoma o áudio suspenso (iPhone/Android suspendem ao trocar de app ou sem gesto). */
+  resume() {
+    if (this.ctx && this.ctx.state !== 'running') void this.ctx.resume().catch(() => {});
+  }
+
   /** Precisa ser chamado após um gesto do usuário (política dos navegadores). */
   init() {
     if (this.ctx) {

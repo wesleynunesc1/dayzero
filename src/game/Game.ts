@@ -9,13 +9,16 @@ import { Camera } from '../engine/Camera';
 import { Input } from '../engine/Input';
 import { clamp } from '../engine/math';
 import { Renderer } from '../render/Renderer';
-import { findInteractable, interact, Interactable } from '../systems/Interaction';
+import { findInteractable, findInteractables, interact, Interactable } from '../systems/Interaction';
 import { doPlayerItemAction, takeAll } from '../systems/ItemActions';
 import { respawnPlayer } from '../systems/Respawn';
 import { Simulation } from '../systems/Simulation';
 import { applySave, loadFromStorage, saveToStorage, serializeWorld, SaveData, auditUids } from '../systems/Save';
 import { WeatherKind } from '../systems/Weather';
 import { UI, UIHost } from '../ui/UI';
+import { detectTouch, TouchControls, type TopAction } from '../ui/TouchControls';
+import { makeRotateOverlay, MOBILE_CSS, PrefsPanel } from '../ui/MobileUI';
+import { itemDef } from '../data/items';
 import { EMPTY_COMMAND, PlayerCommand, World } from '../world/World';
 
 type State = 'title' | 'playing' | 'paused' | 'dead';
@@ -52,6 +55,18 @@ export class Game implements UIHost {
   /** Conexão com servidor (modo online). Null = jogo local. */
   net: NetClient | null = null;
   private pingT = 0;
+  /** Controles de toque (celular/tablet). */
+  readonly touch: TouchControls;
+  readonly prefsPanel: PrefsPanel;
+  /** Jogando por toque? (detectado e trocado automaticamente pelo tipo de ponteiro usado). */
+  touchMode = false;
+  private targets: Interactable[] = [];
+  private targetIdx = 0;
+  private targetKey = '';
+  /** Última direção de mira por toque (o personagem continua olhando para ela). */
+  private touchDir = { x: 0, y: 1 };
+  private actGuard = new Map<string, number>();
+  private quickSwapT = 0;
 
   // ------------------------------------------------------------------ multijogador
   async connectServer(url: string, name: string) {
@@ -116,6 +131,14 @@ export class Game implements UIHost {
 
   /** Ação discreta: no servidor (online) ou direto no mundo local. */
   async act(name: string, ...args: unknown[]): Promise<ActionResult> {
+    // toques repetidos rápidos no mesmo botão (dedo "quicando") não repetem a ação
+    if (this.touchMode) {
+      const key = `${name}|${JSON.stringify(args)}`;
+      const now = performance.now();
+      if (now - (this.actGuard.get(key) ?? -1e9) < 260) return { ok: false };
+      this.actGuard.set(key, now);
+      if (this.actGuard.size > 64) this.actGuard.clear();
+    }
     if (this.net) return this.net.request(name, args);
     return runAction(this.world, this.world.localId, name, args);
   }
@@ -128,15 +151,42 @@ export class Game implements UIHost {
     this.renderer = new Renderer(this.canvas);
     this.input = new Input(this.canvas);
     this.ui = new UI(root, this);
+    const mcss = document.createElement('style');
+    mcss.textContent = MOBILE_CSS;
+    document.head.appendChild(mcss);
+    this.touch = new TouchControls(root);
+    this.touch.onTop = (a) => this.touchTop(a);
+    this.touch.onClose = () => {
+      this.prefsPanel.hide();
+      this.ui.closeAll();
+    };
+    this.prefsPanel = new PrefsPanel(root, this.touch.prefs, (pr) => {
+      this.touch.applyPrefs();
+      if (pr.quality !== this.renderer.quality) this.applyQuality();
+    });
+    makeRotateOverlay();
+    this.setTouchMode(detectTouch());
+    try {
+      if (!localStorage.getItem('oua.mobile')) this.touch.prefs.quality = this.touchMode ? 'medio' : 'alto';
+    } catch {
+      /* sem armazenamento */
+    }
+    this.applyQuality();
+    this.installMobileGuards();
     this.newWorld(CONFIG.seed + 7);
     this.state = 'title';
     this.canvas.classList.add('menu');
     this.ui.showTitle(true, this.saveInfo());
-    window.addEventListener('resize', () => {
+    const onResize = () => {
       this.renderer.resize();
       this.camera.viewW = this.renderer.viewW;
       this.camera.viewH = this.renderer.viewH;
-    });
+      document.body.classList.toggle('portrait', window.innerHeight > window.innerWidth);
+    };
+    window.addEventListener('resize', onResize);
+    window.addEventListener('orientationchange', () => setTimeout(onResize, 120));
+    window.visualViewport?.addEventListener('resize', onResize);
+    document.body.classList.toggle('portrait', window.innerHeight > window.innerWidth);
     window.addEventListener('keydown', (e) => {
       // caixa de fala/rádio abre na hora (sem esperar o próximo quadro), com o foco no campo
       if ((e.code === 'Enter' || e.code === 'KeyT') && this.state === 'playing' && !this.ui.isModalOpen() && !e.repeat) {
@@ -378,8 +428,244 @@ export class Game implements UIHost {
       interact: !modal && inp.consume('interact'),
       reload: inp.consume('reload'),
     };
+    if (this.touchMode) this.applyTouch(cmd, modal);
     if (this.testCommand) Object.assign(cmd, this.testCommand);
     return cmd;
+  }
+
+  // ------------------------------------------------------------------ celular / toque
+  setTouchMode(on: boolean) {
+    if (on === this.touchMode && document.body.classList.contains('touch') === on) return;
+    this.touchMode = on;
+    document.body.classList.toggle('touch', on);
+    this.renderer.fractional = on;
+    if (this.camera) this.applyQuality();
+    if (!on) this.touch.releaseAll();
+  }
+
+  applyQuality() {
+    this.renderer.setQuality(this.touch.prefs.quality);
+    if (!this.camera) return;
+    this.camera.viewW = this.renderer.viewW;
+    this.camera.viewH = this.renderer.viewH;
+  }
+
+  openPrefs() {
+    this.prefsPanel.show();
+  }
+
+  /** Ajustes do navegador do celular: rolagem, zoom de pinça, menu de toque longo, segundo plano. */
+  private installMobileGuards() {
+    // troca automática: tocou na tela → controles de toque; usou mouse → teclado e mouse
+    window.addEventListener(
+      'pointerdown',
+      (e) => {
+        if (e.pointerType === 'touch' || e.pointerType === 'pen') this.setTouchMode(true);
+        else if (e.pointerType === 'mouse' && this.touchMode && !detectTouch()) this.setTouchMode(false);
+        this.audio.resume();
+      },
+      { capture: true },
+    );
+    // iPhone só libera o áudio dentro de um gesto "completo" (soltar o dedo / clique)
+    for (const ev of ['pointerup', 'touchend', 'click']) window.addEventListener(ev, () => this.audio.resume(), { capture: true, passive: true });
+    const stop = (e: Event) => {
+      const t = e.target as HTMLElement | null;
+      if (t?.closest?.('input,select,textarea')) return;
+      e.preventDefault();
+    };
+    document.addEventListener('gesturestart', stop as EventListener, { passive: false });
+    document.addEventListener('dblclick', (e) => this.touchMode && stop(e), { passive: false });
+    document.addEventListener('contextmenu', (e) => this.touchMode && stop(e));
+    document.addEventListener(
+      'touchmove',
+      (e) => {
+        if (!this.touchMode) return;
+        const t = e.target as HTMLElement | null;
+        // rolagem só dentro das listas e janelas que rolam
+        if (t?.closest?.('.inv-list,.details,.cond-panel,#npcdlg,#trade,#journal,.screen .card,#prefs')) return;
+        if (e.cancelable) e.preventDefault();
+      },
+      { passive: false },
+    );
+    // segundo plano (trocar de app, bloquear a tela): pausa e salva para não perder nada
+    const away = () => {
+      this.touch.releaseAll();
+      this.input.releaseAll();
+      if (this.state === 'playing' && !this.net) {
+        this.saveGame(true);
+        this.state = 'paused';
+        this.ui.showPause(true);
+        this.canvas.classList.add('menu');
+      }
+    };
+    document.addEventListener('visibilitychange', () => document.hidden && away());
+    window.addEventListener('pagehide', away);
+    window.addEventListener('blur', () => this.touch.releaseAll());
+  }
+
+  private touchTop(a: TopAction) {
+    if (this.state !== 'playing') return;
+    this.input.releaseAll();
+    switch (a) {
+      case 'menu':
+        this.state = 'paused';
+        this.ui.showPause(true);
+        this.canvas.classList.add('menu');
+        break;
+      case 'inv':
+        this.ui.toggleInventory();
+        break;
+      case 'map':
+        this.ui.toggleMap();
+        break;
+      case 'radio':
+      case 'talk': {
+        this.ui.panels.openTalk();
+        const sel = document.querySelector('#talk select') as HTMLSelectElement | null;
+        if (sel) sel.value = a === 'radio' ? 'radio' : 'falar';
+        break;
+      }
+      case 'journal':
+        this.ui.panels.toggleJournal();
+        break;
+      case 'full':
+        this.toggleFullscreen();
+        break;
+      case 'prefs':
+        this.openPrefs();
+        break;
+    }
+  }
+
+  canFullscreen(): boolean {
+    const d = document.documentElement as HTMLElement & { webkitRequestFullscreen?: () => void };
+    return !!(document.fullscreenEnabled && d.requestFullscreen) || !!d.webkitRequestFullscreen;
+  }
+
+  private toggleFullscreen() {
+    const d = document as Document & { webkitFullscreenElement?: Element; webkitExitFullscreen?: () => void };
+    const el = document.documentElement as HTMLElement & { webkitRequestFullscreen?: () => void };
+    try {
+      if (document.fullscreenElement || d.webkitFullscreenElement) {
+        if (document.exitFullscreen) void document.exitFullscreen();
+        else d.webkitExitFullscreen?.();
+        return;
+      }
+      if (el.requestFullscreen) {
+        void el.requestFullscreen({ navigationUI: 'hide' }).then(() => {
+          const o = screen.orientation as ScreenOrientation & { lock?: (o: string) => Promise<void> };
+          o?.lock?.('landscape').catch(() => {});
+        }).catch(() => this.world.msg('O navegador não permitiu a tela cheia.', 'warn'));
+      } else el.webkitRequestFullscreen?.();
+    } catch {
+      this.world.msg('Tela cheia indisponível neste navegador.', 'warn');
+    }
+  }
+
+  /** Mesma intenção do teclado/mouse, vinda dos controles de toque. Sem mira nem disparo automáticos. */
+  private applyTouch(cmd: PlayerCommand, modal: boolean) {
+    const t = this.touch;
+    const s = t.state;
+    const w = this.world;
+    const p = w.player;
+    if (modal || this.prefsPanel.open) {
+      cmd.mx = cmd.my = 0;
+      cmd.attack = cmd.attackPressed = cmd.aimHeld = cmd.interact = false;
+      return;
+    }
+    const driving = !!p.vehicleId;
+    cmd.mx = s.mx;
+    cmd.my = driving && s.pedal ? -s.pedal : s.my;
+    cmd.run = cmd.run || s.run;
+    if (t.consume('crouch')) cmd.toggleCrouch = true;
+    if (t.consume('reload')) cmd.reload = true;
+    // direção: a do joystick de mira; sem ele, a do movimento; parado, a última usada
+    if (s.aiming) this.touchDir = { x: s.aimDx, y: s.aimDy };
+    else if (Math.hypot(s.mx, s.my) > 0.25 && !driving) {
+      const m = Math.hypot(s.mx, s.my);
+      this.touchDir = { x: s.mx / m, y: s.my / m };
+    }
+    const reach = 70 * t.prefs.aimSens;
+    cmd.aimX = p.x + this.touchDir.x * reach;
+    cmd.aimY = p.y + this.touchDir.y * reach;
+    const gun = p.weapon.kind === 'gun';
+    cmd.aimHeld = s.aiming && gun;
+    // disparar: só com arma de fogo; se ela estiver na mochila, o primeiro toque a empunha
+    if (t.consume('fire')) {
+      if (gun) cmd.attackPressed = true;
+      else this.quickSwap('gun');
+    }
+    // golpe: corpo a corpo; com arma de fogo na mão, o primeiro toque troca para a arma branca
+    if (t.consume('melee') && gun) this.quickSwap('melee');
+    if (!gun && s.melee) cmd.attack = true;
+    // interagir com o alvo escolhido (⇄ alterna entre os próximos)
+    if (t.consume('next') && this.targets.length > 1) this.targetIdx = (this.targetIdx + 1) % this.targets.length;
+    if (t.consume('interact')) {
+      cmd.interact = true;
+      cmd.interactIndex = this.targetIdx;
+    }
+    t.consume('gas');
+    t.consume('brake');
+  }
+
+  /** Troca rápida de arma por toque (mesma ação do inventário, validada pelo mundo/servidor). */
+  private quickSwap(kind: 'gun' | 'melee') {
+    const now = performance.now();
+    if (now - this.quickSwapT < 400) return;
+    this.quickSwapT = now;
+    const p = this.world.player;
+    const items = p.inv.items.filter((i) => {
+      const wd = itemDef(i.defId).weapon;
+      return wd && (kind === 'gun' ? wd.kind === 'gun' : wd.kind !== 'gun');
+    });
+    if (kind === 'gun') {
+      if (!items.length) return this.world.msg('Você não tem arma de fogo.', 'warn');
+      const best = items.find((i) => (i.state?.ammo ?? 0) > 0) ?? items[0];
+      void this.act('item', 'equip_arma', best.uid);
+      this.world.msg(`${itemDef(best.defId).name} em mãos.`);
+    } else if (items.length) {
+      const best = items.sort((a, b) => (itemDef(b.defId).weapon!.damage ?? 0) - (itemDef(a.defId).weapon!.damage ?? 0))[0];
+      void this.act('item', 'equip_arma', best.uid);
+      this.world.msg(`${itemDef(best.defId).name} em mãos.`);
+    } else if (p.weaponItem) {
+      void this.act('item', 'unequip', p.weaponItem.uid);
+      this.world.msg('Arma guardada: punhos.');
+    }
+  }
+
+  /** Alvos de interação (com escolha por toque) e estado visível dos controles. */
+  private refreshTargets(w: World) {
+    const p = w.player;
+    if (!(this.state === 'playing' && p.alive)) {
+      this.targets = [];
+      this.target = null;
+    } else if (this.touchMode) {
+      this.targets = findInteractables(w);
+      const key = this.targets.map((t) => t.label).join('|');
+      if (key !== this.targetKey) {
+        // lista mudou: tenta manter o mesmo alvo escolhido
+        const prev = this.targets.length && this.target ? this.targets.findIndex((t) => t.label === this.target!.label) : -1;
+        this.targetIdx = prev >= 0 ? prev : 0;
+        this.targetKey = key;
+      }
+      if (this.targetIdx >= this.targets.length) this.targetIdx = 0;
+      this.target = this.targets[this.targetIdx] ?? null;
+    } else this.target = findInteractable(w);
+    if (!this.touchMode) return;
+    const inv = p.inv.items;
+    this.touch.sync({
+      active: this.state === 'playing',
+      modal: this.ui.isModalOpen() || this.prefsPanel.open,
+      driving: !!p.vehicleId,
+      crouch: p.crouch,
+      target: this.target ? this.target.label : null,
+      targets: this.targets.length,
+      hasMap: !!this.ui.mapKind(w) || inv.some((i) => !!itemDef(i.defId).map),
+      hasRadio: inv.some((i) => !!itemDef(i.defId).radio),
+      gun: p.weapon.kind === 'gun' || inv.some((i) => itemDef(i.defId).weapon?.kind === 'gun'),
+      canFull: this.canFullscreen(),
+      isFull: !!document.fullscreenElement,
+    });
   }
 
   private update(dt: number) {
@@ -413,7 +699,7 @@ export class Game implements UIHost {
       this.stepsThisFrame = 1;
       const p = w.player;
       this.camera.follow(p.x, p.y, dt);
-      this.target = this.state === 'playing' && p.alive ? findInteractable(w) : null;
+      this.refreshTargets(w);
       this.audio.setRain(w.weather.rain);
       if (this.deathTimer > 0) {
         this.deathTimer -= dt;
@@ -427,7 +713,8 @@ export class Game implements UIHost {
     }
     // dormindo: o tempo do mundo corre acelerado (simulação real, passo a passo)
     if (this.state === 'playing' && w.player.sleep && this.timeScale > 0) {
-      const wake = this.input.consume('interact');
+      const wake = this.input.consume('interact') || (this.touchMode && this.touch.consume('interact'));
+      this.refreshTargets(w);
       for (let i = 0; i < CONFIG.time.sleepStepsPerFrame && w.player.sleep; i++) {
         this.sim.step(STEP, { ...EMPTY_COMMAND, aimX: w.player.aimX, aimY: w.player.aimY, interact: wake && i === 0 });
       }
@@ -472,7 +759,7 @@ export class Game implements UIHost {
       this.camera.follow(p.x + (p.alive ? lookX : 0), p.y + (p.alive ? lookY : 0), dt);
     }
 
-    this.target = this.state === 'playing' && p.alive ? findInteractable(w) : null;
+    this.refreshTargets(w);
 
     // áudio contínuo
     this.audio.setRadio(p.alive && p.inv.items.some((i) => i.defId === 'radio' && i.state?.on));
@@ -514,6 +801,7 @@ export class Game implements UIHost {
       overview: this.state === 'title',
     });
     if (this.state !== 'title') this.ui.updateHud(this.world, this.target, this.fpsText);
+    this.touch.setActive(this.state === 'playing');
   }
 
   // ------------------------------------------------------------------ utilidades de depuração/teste

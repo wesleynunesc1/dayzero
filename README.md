@@ -6,6 +6,7 @@ Tudo em português do Brasil. Arte e sons são **provisórios, originais e gerad
 - **Etapa 1** — bairro explorável, infectados com IA (visão, audição, perseguição, busca), ruído com propagação física, combate, ferimentos, inventário com peso, NPC aliado, mapa de papel, morte com corpo saqueável.
 - **Etapa 2** — fome, sede, energia/sono, caminhonete com gasolina, crafting, abrigo com barricadas, clima, dia/noite e salvamento. Veja `ETAPA02.md`.
 - **Etapas 3–5** — mundo de 512×384 tiles com 4 regiões e cidades, mapas físicos, NPCs com memória e emoções, facções, captura e prisão, rádio, campanha de 10 capítulos, missões secundárias e **multijogador com servidor autoritativo**. Veja `ETAPAS-3-5.md` (inclui o relatório de testes e as limitações).
+- **Celular** — jogável no navegador do Android (Chrome) e do iPhone (Safari): joysticks virtuais, botões de toque, interface compacta, ajustes e qualidade gráfica BAIXO/MÉDIO/ALTO. Veja `MOBILE.md` (controles, testes em emulação e o que ainda falta testar em aparelho real).
 
 ---
 
@@ -54,6 +55,7 @@ npm run typecheck      # TypeScript estrito
 npm test               # 24 testes de integração (servidor real) + campanha completa (10 capítulos)
 npm run test:etapa2    # Etapas 1 e 2 (lógica)
 npm run test:e2e       # navegador (requer Playwright + Chromium; o teste da Etapa 3 sobe o servidor sozinho)
+npm run test:mobile    # celular em emulação (Pixel 7 / iPhone 14): sirva dist/ em :8080 antes
 ```
 
 ---

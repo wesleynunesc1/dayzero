@@ -3,7 +3,7 @@ import { itemDef } from '../data/items';
 import { approachAngle, dist } from '../engine/math';
 import type { PlayerCommand, World } from '../world/World';
 import { fireGun, meleeSwing } from './Combat';
-import { containerInReach, endSleep, findInteractable, interact } from './Interaction';
+import { containerInReach, endSleep, findInteractable, findInteractables, interact } from './Interaction';
 import { startReload } from './ItemActions';
 import { isFed, needModifiers, updateNeeds } from './Needs';
 import { handlePlayerDeath } from './Respawn';
@@ -243,7 +243,7 @@ export function updatePlayer(world: World, cmd: PlayerCommand, dt: number) {
   if (cmd.reload) startReload(world);
 
   if (cmd.interact) {
-    const it = findInteractable(world);
+    const it = cmd.interactIndex ? findInteractables(world)[cmd.interactIndex] ?? findInteractable(world) : findInteractable(world);
     if (it) interact(world, it);
   }
 

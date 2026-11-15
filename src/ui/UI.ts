@@ -40,6 +40,8 @@ export interface UIHost {
   pickSlot(slot: number): void;
   setMode(mode: Mode): void;
   startOnline(): void;
+  /** Abre os ajustes (controles de toque, sensibilidade, qualidade gráfica). */
+  openPrefs(): void;
 }
 
 const el = <K extends keyof HTMLElementTagNameMap>(tag: K, cls = '', html = ''): HTMLElementTagNameMap[K] => {
@@ -69,6 +71,31 @@ const CONTROLS: [string, string][] = [
   ['1–8', 'Escolher opção numa conversa'],
   ['Esc', 'Pausar / fechar janelas'],
 ];
+
+const TOUCH_HELP: [string, string][] = [
+  ['◯ esquerdo', 'Andar (arraste em qualquer ponto da metade esquerda)'],
+  ['◯ direito', 'Mirar (arraste na metade direita; solte e a direção fica)'],
+  ['🎯', 'Disparar (equipa a arma de fogo se estiver na mochila)'],
+  ['🔪', 'Golpe corpo a corpo (troca para a arma branca)'],
+  ['⟳ / 🏃 / 🧎', 'Recarregar · Correr (segure) · Agachar (alterna)'],
+  ['✋ / ⇄', 'Interagir com o que está marcado · trocar de alvo'],
+  ['🎒 🗺 📻 💬 📖', 'Inventário · mapa (se tiver) · rádio (se tiver) · falar · diário'],
+  ['⬆ ⬇', 'No carro: acelerar e frear/ré; o joystick esterça'],
+];
+/** Dicas de teclado viram os botões equivalentes quando se joga por toque. */
+function touchText(t: string): string {
+  return t
+    .replace('W acelera, S freia/ré, A/D esterçam, E sai', 'Acelerar/Frear nos pedais, joystick esterça, ✋ sai')
+    .replace(/\[E\]/g, '✋')
+    .replace(/\[R\]/g, '⟳')
+    .replace(/\[I\]/g, '🎒')
+    .replace(/\[M\]/g, '🗺')
+    .replace(/\[J\]/g, '📖')
+    .replace(/\[H\]/g, '🎒 › Condição')
+    .replace(/\[Esc\]/g, '☰')
+    .replace(/\(J abre o diário\)/g, '(📖 abre o diário)');
+}
+const touchHelp = () => `<div class="controls touch-help">${TOUCH_HELP.map(([k, v]) => `<span class="kbd">${k}</span><span>${v}</span>`).join('')}</div>`;
 
 /** Interface em português do Brasil (HUD, inventário, mapa, diálogos e menus). */
 export class UI {
@@ -153,11 +180,24 @@ export class UI {
     this.inv = el('div', 'modal hidden');
     this.inv.id = 'inventory';
     this.inv.addEventListener('mousedown', (e) => e.stopPropagation());
+    // toque: depois de uma ação, os próximos toques "repetidos" (que cairiam em outro botão,
+    // já que a lista muda de lugar) são ignorados por um instante
+    this.inv.addEventListener(
+      'click',
+      (e) => {
+        if (document.body.classList.contains('touch') && performance.now() < this.tapLock) {
+          this.tapLock = performance.now() + 250; // rajada de toques: segue ignorando até ela parar
+          e.stopPropagation();
+          e.preventDefault();
+        }
+      },
+      true,
+    );
 
     this.mapview = el('div', 'modal hidden');
     this.mapview.id = 'mapview';
     this.mapCanvas = document.createElement('canvas');
-    const mapHint = el('div', 'foot', 'O mapa não mostra onde você está, nem onde estão os outros. Clique para marcar · botão direito apaga · <span class="kbd">M</span>/<span class="kbd">Esc</span> fechar');
+    const mapHint = el('div', 'foot', 'O mapa não mostra onde você está, nem onde estão os outros. Clique/toque para marcar · botão direito (ou “Apagar” no seletor) apaga · <span class="kbd">M</span>/<span class="kbd">Esc</span>/✕ fechar');
     this.mapTools = el('div');
     this.mapTools.id = 'maptools';
     this.mapview.append(this.mapTools, this.mapCanvas, mapHint);
@@ -177,10 +217,10 @@ export class UI {
       <div class="card">
         <div class="sub">Etapas 1–5 · Sobrevivência cooperativa</div>
         <h1>O Último<br>Amanhecer</h1>
-        <div class="btns"><button class="btn primary hidden" data-a="continue">Continuar partida</button><button class="btn" data-a="start">Novo mundo — SOLO (offline)</button><button class="btn" data-a="multi">Multijogador (1–4)</button><button class="btn" data-a="demo">Área demonstrativa (visual)</button><button class="btn" data-a="controls">Controles</button></div>
+        <div class="btns"><button class="btn primary hidden" data-a="continue">Continuar partida</button><button class="btn" data-a="start">Novo mundo — SOLO (offline)</button><button class="btn" data-a="multi">Multijogador (1–4)</button><button class="btn" data-a="demo">Área demonstrativa (visual)</button><button class="btn" data-a="controls">Controles</button><button class="btn" data-a="prefs">Ajustes</button></div>
         <div class="foot hidden" data-k="saveinfo"></div>
         <div class="hidden" data-k="lobby" style="margin-top:10px;display:flex;flex-direction:column;gap:6px"></div>
-        <div class="controls hidden" data-k="controls">${CONTROLS.map(([k, v]) => `<span class="kbd">${k}</span><span>${v}</span>`).join('')}</div>
+        <div class="hidden" data-k="controls"><div class="controls">${CONTROLS.map(([k, v]) => `<span class="kbd">${k}</span><span>${v}</span>`).join('')}</div>${touchHelp()}</div>
         <div class="note">Sobreviva em um bairro tomado por infectados. Explore, procure suprimentos, evite barulho.
         Uma mordida é fatal. Use fones de ouvido: os sons indicam o que você não vê.<br><br>
         Arte e sons são provisórios, originais e gerados pelo próprio jogo.</div>
@@ -192,6 +232,7 @@ export class UI {
       if (a === 'continue') this.host.continueGame();
       if (a === 'controls') this.title.querySelector('[data-k=controls]')!.classList.toggle('hidden');
       if (a === 'multi') this.showLobby(null, '');
+      if (a === 'prefs') this.host.openPrefs();
     });
 
     this.pause = el('div', 'screen hidden');
@@ -199,7 +240,7 @@ export class UI {
     this.pause.innerHTML = `
       <div class="card panel">
         <h2 class="label" style="font-size:12px">Jogo pausado</h2>
-        <div class="controls">${CONTROLS.map(([k, v]) => `<span class="kbd">${k}</span><span>${v}</span>`).join('')}</div>
+        <div class="controls">${CONTROLS.map(([k, v]) => `<span class="kbd">${k}</span><span>${v}</span>`).join('')}</div>${touchHelp()}
         <label class="label" style="margin-top:6px">Regra de retorno após a morte</label>
         <select data-k="respawn">${(Object.keys(RESPAWN_MODE_LABELS) as RespawnMode[]).map((m) => `<option value="${m}">${RESPAWN_MODE_LABELS[m]}</option>`).join('')}</select>
         <div style="display:flex;gap:8px;margin-top:8px;flex-wrap:wrap">
@@ -207,6 +248,7 @@ export class UI {
           <button class="btn" data-a="save">Salvar partida</button>
           <button class="btn" data-a="load">Carregar último salvamento</button>
           <button class="btn" data-a="sound">Som: ligado</button>
+          <button class="btn" data-a="prefs">Ajustes</button>
           <button class="btn danger" data-a="restart">Reiniciar partida</button>
         </div>
       </div>`;
@@ -217,6 +259,7 @@ export class UI {
       if (a === 'save') t.textContent = this.host.saveGame() ? 'Salvo ✓' : 'Falha ao salvar';
       if (a === 'load') this.host.loadGame();
       if (a === 'restart') this.host.restart();
+      if (a === 'prefs') this.host.openPrefs();
       if (a === 'sound') t.textContent = `Som: ${this.host.toggleSound() ? 'ligado' : 'desligado'}`;
     });
     const sel = this.pause.querySelector('select')! as HTMLSelectElement;
@@ -264,6 +307,7 @@ export class UI {
   }
 
   private pushLog(text: string, tone: Tone) {
+    if (document.body.classList.contains('touch')) text = touchText(text);
     const d = el('div', tone, esc(text));
     this.log.appendChild(d);
     while (this.log.children.length > 6) this.log.firstChild!.remove();
@@ -287,7 +331,9 @@ export class UI {
     box.classList.remove('hidden');
     if (!st) {
       // servido pelo próprio servidor do jogo → mesmo endereço; Vite/arquivo local → porta padrão do servidor
-      const def = location.protocol.startsWith('http') && location.port && location.port !== '5173' ? `ws://${location.host}/ws` : `ws://${location.hostname || 'localhost'}:${CONFIG.multiplayer.port}/ws`;
+      // página em HTTPS exige conexão segura (wss://), senão o navegador bloqueia
+      const ws = location.protocol === 'https:' ? 'wss' : 'ws';
+      const def = location.protocol.startsWith('http') && location.port && location.port !== '5173' ? `${ws}://${location.host}/ws` : `${ws}://${location.hostname || 'localhost'}:${CONFIG.multiplayer.port}/ws`;
       box.innerHTML = `<div class="label">Servidor</div><input data-k="url" value="${def}" style="background:#151514;color:var(--ink);border:1px solid var(--line);padding:6px"/>
         <div class="label">Seu nome (use o mesmo para voltar ao seu personagem)</div><input data-k="nome" maxlength="24" value="${esc(localStorage.getItem('oua.nome') ?? '')}" style="background:#151514;color:var(--ink);border:1px solid var(--line);padding:6px"/>
         <button class="btn primary" data-l="conectar">Conectar</button>
@@ -632,6 +678,11 @@ export class UI {
       </div>`;
   }
 
+  private tapLock = 0;
+  private lockTaps() {
+    this.tapLock = performance.now() + 450;
+  }
+
   private bindInventory(c: Container | undefined) {
     const w = this.host.world;
     this.inv.querySelectorAll('li[data-uid]').forEach((li) => {
@@ -639,7 +690,9 @@ export class UI {
       e.addEventListener('click', () => {
         const uid = e.dataset.uid!;
         const now = performance.now();
-        const dbl = this.lastClick && this.lastClick.uid === uid && now - this.lastClick.t < 380;
+        // no toque, o duplo toque não executa nada: dedos repetidos sobre uma lista que muda
+        // acionariam o item errado. Lá as ações ficam só nos botões (maiores) dos detalhes.
+        const dbl = !document.body.classList.contains('touch') && this.lastClick && this.lastClick.uid === uid && now - this.lastClick.t < 380;
         this.lastClick = { uid, t: now };
         if (!dbl) {
           this.selected = { side: e.dataset.side as 'p' | 'c', uid };
@@ -664,6 +717,7 @@ export class UI {
         const id = (b as HTMLElement).dataset.act!;
         const s = this.selected;
         if (!s) return;
+        this.lockTaps();
         if (s.side === 'c' && c) {
           if (id === 'take') void this.host.act('take', c.id, s.uid).then(() => this.renderInventory());
           else if (id === 'examine') {
@@ -682,10 +736,12 @@ export class UI {
     );
     this.inv.querySelectorAll('button[data-craft]').forEach((b) =>
       b.addEventListener('click', () => {
+        this.lockTaps();
         void this.host.act('craft', (b as HTMLElement).dataset.craft!).then(() => this.renderInventory());
       }),
     );
     this.inv.querySelector('[data-a=takeall]')?.addEventListener('click', () => {
+      this.lockTaps();
       if (c) void this.host.act('takeAll', c.id).then(() => this.renderInventory());
     });
     this.inv.querySelector('[data-a=cond]')?.addEventListener('click', () => {
@@ -753,7 +809,7 @@ export class UI {
     const kindSel = (this.mapTools.querySelector('select[data-k=mk]') as HTMLSelectElement | null)?.value ?? 'abrigo';
     const note = (this.mapTools.querySelector('input[data-k=note]') as HTMLInputElement | null)?.value ?? '';
     this.mapTools.innerHTML = `${maps.map((m) => `<button class="btn ${m.key === sel ? 'primary' : ''}" data-map="${m.key}">${esc(m.label)}</button>`).join('')}
-      <span style="margin-left:8px">Marcar:</span><select data-k="mk">${Object.entries(MARKER_LABEL).map(([k, l]) => `<option value="${k}" ${k === kindSel ? 'selected' : ''}>${l}</option>`).join('')}</select>
+      <span style="margin-left:8px">Marcar:</span><select data-k="mk">${Object.entries(MARKER_LABEL).map(([k, l]) => `<option value="${k}" ${k === kindSel ? 'selected' : ''}>${l}</option>`).join('')}<option value="__apagar" ${kindSel === '__apagar' ? 'selected' : ''}>✕ Apagar marcação (toque)</option></select>
       <input data-k="note" maxlength="40" placeholder="anotação (opcional)" value="${esc(note)}"/>`;
     this.mapTools.querySelectorAll('button[data-map]').forEach((b) =>
       b.addEventListener('click', () => {
@@ -778,7 +834,12 @@ export class UI {
     const cy = ((e.clientY - r.top) / r.height) * this.mapCanvas.height;
     const t = this.mapView.toTile(cx, cy);
     if (!t) return;
-    const kind = (this.mapTools.querySelector('select[data-k=mk]') as HTMLSelectElement).value as MarkerKind;
+    let kind = (this.mapTools.querySelector('select[data-k=mk]') as HTMLSelectElement).value as MarkerKind;
+    // no celular não há botão direito: "Apagar" no seletor faz o toque apagar
+    if ((kind as string) === '__apagar') {
+      remove = true;
+      kind = 'abrigo';
+    }
     const note = (this.mapTools.querySelector('input[data-k=note]') as HTMLInputElement).value;
     void this.host.act(remove ? 'unmarker' : 'marker', t.x, t.y, kind, note).then(() => this.renderMap());
   }

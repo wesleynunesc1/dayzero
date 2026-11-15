@@ -14,7 +14,8 @@
     "server": "tsx server/index.ts",
     "test:etapa2": "tsx tests/etapa2.test.ts && tsx tests/ai.test.ts && tsx tests/items.test.ts",
     "test:etapa3": "tsx tests/etapa3.test.ts",
-    "test:campanha": "tsx tests/campanha.test.ts"
+    "test:campanha": "tsx tests/campanha.test.ts",
+    "test:mobile": "node tests/e2e-mobile.mjs"
   },
   "devDependencies": {
     "typescript": "^5.6.0",

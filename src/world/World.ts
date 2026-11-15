@@ -129,6 +129,8 @@ export interface PlayerCommand {
   attackPressed: boolean;
   aimHeld: boolean;
   interact: boolean;
+  /** Qual dos objetos ao alcance usar (0 = o mais provável). Escolha feita no celular. */
+  interactIndex?: number;
   reload: boolean;
 }
 

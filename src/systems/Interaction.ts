@@ -49,8 +49,16 @@ export function distToRect(px: number, py: number, x: number, y: number, w: numb
 
 const hasTool = (world: World, ids: string[]) => ids.some((id) => world.player.inv.count(id) > 0);
 
+/** Todos os objetos interativos ao alcance, do mais provável ao menos (para escolher no celular). */
+export function findInteractables(world: World): Interactable[] {
+  const out: Interactable[] = [];
+  const best = findInteractable(world, out);
+  if (best && !out.length) out.push(best);
+  return out;
+}
+
 /** Encontra o melhor objeto interativo à frente/perto do jogador. */
-export function findInteractable(world: World): Interactable | null {
+export function findInteractable(world: World, out?: Interactable[]): Interactable | null {
   const p = world.player;
   if (p.dead || !p.alive) return null;
   if (p.sleep) return { kind: 'wake', label: 'Acordar', x: p.x, y: p.y };
@@ -64,11 +72,13 @@ export function findInteractable(world: World): Interactable | null {
   const pty = Math.floor(p.y / TILE);
   let best: Interactable | null = null;
   let bestScore = Infinity;
+  const all: { it: Interactable; score: number }[] = [];
   const consider = (it: Interactable, d: number, bias = 0) => {
     if (d > REACH) return;
     const a = Math.atan2(it.y - p.y, it.x - p.x);
     const ang = Math.abs(angleDiff(p.facing, a));
     const score = d + ang * 5 + bias;
+    if (out) all.push({ it, score });
     if (score < bestScore) {
       bestScore = score;
       best = it;
@@ -161,6 +171,15 @@ export function findInteractable(world: World): Interactable | null {
     if (o === p || !o.isDown || o.dead) continue;
     const d = dist(p.x, p.y, o.x, o.y) - o.radius;
     consider({ kind: 'revive', label: `Socorrer ${o.name}`, x: o.x, y: o.y, target: o }, d - 3);
+  }
+  if (out) {
+    all.sort((a, b) => a.score - b.score);
+    const seen = new Set<string>();
+    for (const { it } of all) {
+      if (seen.has(it.label)) continue;
+      seen.add(it.label);
+      out.push(it);
+    }
   }
   return best;
 }

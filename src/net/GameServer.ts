@@ -338,6 +338,7 @@ function sanitize(c: PlayerCommand): PlayerCommand {
     attackPressed: !!c?.attackPressed,
     aimHeld: !!c?.aimHeld,
     interact: !!c?.interact,
+    interactIndex: Math.max(0, Math.min(8, Math.floor(n(c?.interactIndex)))),
     reload: !!c?.reload,
   };
 }

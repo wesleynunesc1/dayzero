@@ -49,7 +49,7 @@ export class Renderer {
   private lictx: Ctx;
   private tex = new TileTextures();
   private chunks = new Map<number, HTMLCanvasElement>();
-  private roofs: HTMLCanvasElement[] = [];
+  private roofs = new Map<number, HTMLCanvasElement>();
   private roofAlpha: number[] = [];
   private world: World | null = null;
   zoom = 3;
@@ -102,21 +102,36 @@ export class Renderer {
     this.world = world;
     this.chunks.clear();
     world.map.dirtyChunks.clear();
-    this.roofs = world.buildings.map((b) => makeRoof(b));
+    this.roofs.clear();
     this.roofAlpha = world.buildings.map(() => 1);
     this.visStamp = new Uint32Array(world.map.w * world.map.h);
     world.pendingDecals.length = 0;
   }
 
   // ================================================================ chunks estáticos
+  /** Chunks são gerados sob demanda e descartados (LRU) — o mundo grande não fica todo em memória. */
   private chunk(cx: number, cy: number): HTMLCanvasElement {
     const key = cy * 1000 + cx;
     let c = this.chunks.get(key);
     if (!c) {
       c = this.buildChunk(cx, cy);
-      this.chunks.set(key, c);
-    }
+      if (this.chunks.size >= 36) {
+        const oldest = this.chunks.keys().next().value as number;
+        this.chunks.delete(oldest);
+      }
+    } else this.chunks.delete(key);
+    this.chunks.set(key, c);
     return c;
+  }
+
+  private roof(id: number): HTMLCanvasElement {
+    let r = this.roofs.get(id);
+    if (!r) {
+      r = makeRoof(this.world!.buildings[id]);
+      if (this.roofs.size >= 80) this.roofs.delete(this.roofs.keys().next().value as number);
+    } else this.roofs.delete(id);
+    this.roofs.set(id, r);
+    return r;
   }
 
   private buildChunk(cx: number, cy: number): HTMLCanvasElement {
@@ -481,6 +496,9 @@ export class Renderer {
     const actors: Actor[] = [];
     for (const z of world.zombies) if (inView(z.x, z.y) && (overview || this.isVisible(world, z))) actors.push(z);
     for (const a of world.allies) if (a.state !== 'morto' && inView(a.x, a.y) && (overview || this.isVisible(world, a))) actors.push(a);
+    for (const n of world.npcs) if (n.state !== 'morto' && inView(n.x, n.y) && (overview || this.isVisible(world, n))) actors.push(n);
+    // outros sobreviventes: só aparecem se estiverem À VISTA (nenhum marcador de aliado)
+    for (const o of world.players) if (o !== p && o.alive && !o.vehicleId && inView(o.x, o.y) && (overview || this.isVisible(world, o))) actors.push(o);
     if (p.alive && !overview && !p.vehicleId) actors.push(p);
     actors.sort((a, b) => a.y - b.y);
     for (const a of actors) this.drawActor(L, a, world);
@@ -559,7 +577,7 @@ export class Renderer {
       L.fillStyle = '#000';
       L.fillRect(bx + 4, by + 6, b.w * TILE, b.h * TILE);
       L.globalAlpha = a;
-      L.drawImage(this.roofs[b.id], bx, by);
+      L.drawImage(this.roof(b.id), bx, by);
       L.globalAlpha = 1;
     }
 
@@ -818,7 +836,10 @@ export class Renderer {
       return;
     }
     if (a instanceof Ally) {
-      drawHuman(L, { ...base, weapon: 'melee', weaponLen: 10, weaponColor: '#6a6e70' });
+      const wit = a.inv.get(a.weaponUid);
+      const wd = wit ? itemDef(wit.defId).weapon : null;
+      const isNpc = a.state === 'npc';
+      drawHuman(L, { ...base, weapon: wd ? (wd.kind === 'gun' ? 'gun' : 'melee') : isNpc ? 'none' : 'melee', weaponLen: wd?.length ?? 10, weaponColor: '#6a6e70' });
       return;
     }
     if (a instanceof Player) {

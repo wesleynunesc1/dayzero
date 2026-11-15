@@ -23,6 +23,8 @@ export const RESPAWN_MODE_LABELS: Record<RespawnMode, string> = {
 export const CONFIG = {
   seed: 20261114,
   respawnMode: 'ponto_seguro_proximo' as RespawnMode,
+  /** Sobreviventes do grupo podem ferir uns aos outros? */
+  friendlyFire: false,
 
   player: {
     walkSpeed: 52,
@@ -72,6 +74,14 @@ export const CONFIG = {
   infection: {
     transmission: { mordida: 1.0, laceracao: 0, arranhao: 0 } as Record<'mordida' | 'laceracao' | 'arranhao', number>,
     deathDelaySec: 0,
+    /**
+     * Regra APÓS a vacina existir (decisão de design ainda em aberto — não inventamos uma solução
+     * definitiva). Opções: 'imune' (mordida deixa de transmitir para quem tomou a vacina),
+     * 'resistente' (só a chance de transmissão cai para transmissaoResistente),
+     * 'sem_efeito' (a vacina não muda nada; só a campanha avança).
+     */
+    afterVaccine: 'imune' as 'imune' | 'resistente' | 'sem_efeito',
+    transmissaoResistente: 0.25,
   },
 
   /** Relógio do mundo: 1 segundo real = N minutos de jogo. Sem prazo de campanha. */
@@ -139,7 +149,73 @@ export const CONFIG = {
   },
 
   save: {
-    key: 'oua.save.v2',
+    key: 'oua.save.v3',
+    legacyKey: 'oua.save.v2',
     autosaveSeconds: 90,
+  },
+
+  /** Mundo grande (Etapas 3–5): carregamento por regiões e hordas migratórias. */
+  world: {
+    /** Raio (em células de 32×32 tiles) mantido ativo ao redor de cada sobrevivente. */
+    activeRadiusCells: 2,
+    /** Velocidade das hordas em modo macro (px/s). */
+    hordeSpeed: 9,
+    /** Horas de descanso de uma horda numa cidade antes de migrar [mín, máx]. */
+    hordeRestHours: [6, 20] as [number, number],
+    /** Se o mundo continua sendo simulado sem nenhum jogador conectado (servidor). */
+    simulateWhenEmpty: false,
+  },
+
+  /** Multijogador: 1–4 sobreviventes; vagas vazias ficam com IA. */
+  multiplayer: {
+    maxSlots: 4,
+    tickRate: 60,
+    snapshotRate: 15,
+    /** Raio de interesse (tiles) para enviar entidades a cada cliente. */
+    interestRadius: 34,
+    port: 8787,
+    /** Segundos sem resposta até considerar o jogador desconectado (IA assume). */
+    timeoutSec: 6,
+    autosaveSeconds: 60,
+  },
+
+  /** Rádio e comunicação. Não há chat global: só fala local e rádio. */
+  radio: {
+    /** Alcance base de um rádio portátil (tiles). */
+    rangeTiles: 150,
+    /** Estações fixas (torre/base) alcançam o mundo todo. */
+    stationRangeTiles: 700,
+    /** Bateria gasta por hora de jogo ligado (0–100). */
+    batteryPerHour: 4,
+    batteryPerMessage: 0.6,
+    frequencies: [1, 2, 3, 4, 5, 6, 7, 8],
+    /** Montanhas entre os rádios aumentam a interferência. */
+    mountainPenalty: 0.012,
+    rainInterference: 0.15,
+    /** Alcance (tiles) da voz sem rádio. Gritar alcança mais e faz barulho. */
+    talkRangeTiles: 9,
+    shoutRangeTiles: 18,
+  },
+
+  /** NPCs com identidade: tudo determinístico, sem chamadas a modelos externos. */
+  npc: {
+    /** Horas que um NPC espera por ajuda antes de guardar ressentimento. */
+    helpWaitHours: 3,
+    memoryMax: 40,
+    senseRange: 11 * TILE,
+    /** NPCs fora das áreas ativas pensam em modo econômico (a cada N segundos). */
+    farThinkSec: 2,
+  },
+
+  /** Facções: reputação vai de -100 (inimigo) a 100 (aliado). */
+  factions: {
+    hostileBelow: -40,
+    friendlyAbove: 30,
+    killMemberRep: -60,
+    stealRep: -15,
+    tradeRep: 3,
+    helpRep: 12,
+    /** Segundos que os guardas esperam pela rendição antes de atacar. */
+    surrenderWaitSec: 6,
   },
 };

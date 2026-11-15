@@ -204,6 +204,53 @@ const painters: Record<number, (ctx: Ctx, rng: RNG) => void> = {
     noise(c, r, [74, 72, 68], 6);
     specks(c, r, [150, 170, 178], 7);
   },
+  [T.WATER]: (c, r) => {
+    noise(c, r, [48, 66, 74], 6);
+    for (let i = 0; i < 5; i++) {
+      const x = r.int(0, 12);
+      const y = r.int(0, 15);
+      for (let k = 0; k < 4; k++) px(c, x + k, y, [70, 92, 100]);
+    }
+  },
+  [T.ROCK]: (c, r) => {
+    noise(c, r, [88, 84, 78], 14);
+    for (let i = 0; i < 6; i++) {
+      const x = r.int(0, 13);
+      const y = r.int(0, 13);
+      px(c, x, y, [112, 108, 100]);
+      px(c, x + 1, y, [112, 108, 100]);
+      px(c, x, y + 2, [62, 58, 54]);
+    }
+    crack(c, r, [58, 54, 50]);
+  },
+  [T.CROP]: (c, r) => {
+    noise(c, r, [74, 66, 44], 8);
+    for (let x = 1; x < S; x += 4)
+      for (let y = 0; y < S; y++) {
+        if (r.chance(0.85)) px(c, x, y, r.chance(0.5) ? [104, 112, 60] : [90, 100, 52]);
+        if (r.chance(0.5)) px(c, x + 1, y, [120, 118, 66]);
+      }
+  },
+  [T.RUNWAY]: (c, r) => {
+    noise(c, r, [72, 72, 70], 6);
+    specks(c, r, [86, 86, 84], 8);
+  },
+  [T.BRIDGE]: (c, r) => {
+    for (let y = 0; y < S; y++)
+      for (let x = 0; x < S; x++) {
+        const k = (r.next() - 0.5) * 8;
+        const seam = x % 4 === 3;
+        px(c, x, y, seam ? [70, 54, 38] : [108 + k, 84 + k, 58 + k]);
+      }
+  },
+  [T.SAND]: (c, r) => {
+    noise(c, r, [128, 116, 92], 10);
+    specks(c, r, [104, 94, 74], 8);
+  },
+  [T.FLOOR_CLINIC]: (c, r) => {
+    noise(c, r, [138, 146, 146], 5);
+    for (let i = 0; i < S; i += 8) for (let k = 0; k < S; k++) px(c, i, k, [118, 126, 126]);
+  },
   [T.FENCE_WOOD]: (c, r) => grass(c, r),
   [T.FENCE_METAL]: (c, r) => painters[T.GRAVEL](c, r),
   [T.HEDGE]: (c, r) => grass(c, r, [66, 78, 48]),

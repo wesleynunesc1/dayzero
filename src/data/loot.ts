@@ -302,6 +302,22 @@ export const CONTAINER_KINDS: Record<string, ContainerKind> = {
     table: [{ id: 'carne_crua', w: 1 }],
   },
   bau: { name: 'Baú do abrigo', capacity: 80, rolls: [0, 0], table: [] },
+  farmacia: { name: 'Prateleira da farmácia', capacity: 20, rolls: [1, 3], table: [
+    { id: 'bandagem', w: 4, qty: [1, 3] }, { id: 'curativo', w: 4, qty: [2, 6] }, { id: 'antisseptico', w: 3 }, { id: 'analgesico', w: 3 }, { id: 'kit_medico', w: 1 }, { id: 'antibiotico', w: 2 } ] },
+  hospital: { name: 'Armário hospitalar', capacity: 20, rolls: [0, 2], table: [
+    { id: 'bandagem', w: 4, qty: [1, 2] }, { id: 'antisseptico', w: 3 }, { id: 'analgesico', w: 2 }, { id: 'kit_medico', w: 1 }, { id: 'curativo', w: 3, qty: [2, 4] }, { id: 'antibiotico', w: 2 } ] },
+  militar: { name: 'Armário militar', capacity: 25, rolls: [0, 2], table: [
+    { id: 'municao_308', w: 3, qty: [3, 8] }, { id: 'municao_9mm', w: 3, qty: [5, 12] }, { id: 'colete', w: 1 }, { id: 'kit_medico', w: 1 }, { id: 'barra_cereal', w: 2, qty: [1, 4] }, { id: 'lanterna', w: 1 }, { id: 'radio', w: 1 } ] },
+  laboratorio: { name: 'Bancada do laboratório', capacity: 15, rolls: [0, 2], table: [
+    { id: 'antisseptico', w: 3 }, { id: 'caderno', w: 2 }, { id: 'pilhas', w: 1 }, { id: 'fita_adesiva', w: 1 } ] },
+  escritorio: { name: 'Armário de escritório', capacity: 10, rolls: [0, 2], table: [
+    { id: 'caderno', w: 3 }, { id: 'pilhas', w: 2 }, { id: 'barra_cereal', w: 1 }, { id: 'radio', w: 1 } ] },
+  celeiro: { name: 'Caixote do celeiro', capacity: 30, rolls: [1, 3], table: [
+    { id: 'corda', w: 2 }, { id: 'tabua', w: 3, qty: [1, 3] }, { id: 'pregos', w: 2, qty: [10, 30] }, { id: 'maca', w: 2 }, { id: 'arroz', w: 2 }, { id: 'serrote', w: 1 }, { id: 'galao_agua', w: 1 } ] },
+  colchao: { name: 'Colchão da cela', capacity: 2, rolls: [0, 0], table: [] },
+  apreensoes: { name: 'Depósito de apreensões', capacity: 999, rolls: [0, 0], table: [] },
+  estoque_faccao: { name: 'Estoque da facção', capacity: 200, rolls: [3, 6], table: [
+    { id: 'feijao_lata', w: 4, qty: [2, 5] }, { id: 'agua', w: 4 }, { id: 'bandagem', w: 2, qty: [1, 3] }, { id: 'municao_9mm', w: 2, qty: [4, 10] }, { id: 'carne_lata', w: 2, qty: [1, 3] }, { id: 'cigarros', w: 2, qty: [1, 4] } ] },
   corpo: { name: 'Corpo', capacity: 999, rolls: [0, 0], table: [] },
 };
 

@@ -18,7 +18,7 @@ import type { NoiseEvent } from './Noise';
 const WALK = 46;
 const RUN = 82;
 
-function allyCost(world: World) {
+export function allyCost(world: World) {
   const map = world.map;
   return (x: number, y: number) => {
     const d = map.doorAt(x, y);
@@ -29,13 +29,13 @@ function allyCost(world: World) {
   };
 }
 
-function say(world: World, a: Ally, text: string, cd = 6) {
+export function say(world: World, a: Ally, text: string, cd = 6) {
   if (a.speakCd > 0) return;
   a.speakCd = cd;
-  world.msg(`${a.name}: ${text}`, 'npc');
+  world.msgNear(a.x, a.y, 16 * TILE, `${a.name}: ${text}`, 'npc');
 }
 
-function goTo(world: World, a: Ally, gx: number, gy: number, speed: number, dt: number): 'ok' | 'fim' | 'porta' {
+export function goTo(world: World, a: Ally, gx: number, gy: number, speed: number, dt: number): 'ok' | 'fim' | 'porta' {
   // linha reta livre: vai direto
   if (world.map.clearPath(a.x, a.y, gx, gy, a.radius * 0.9) && world.map.los(a.x, a.y, gx, gy)) {
     a.path = null;
@@ -90,7 +90,7 @@ function goTo(world: World, a: Ally, gx: number, gy: number, speed: number, dt: 
   return 'ok';
 }
 
-function sense(world: World, a: Ally) {
+export function sense(world: World, a: Ally) {
   const fov = (160 * Math.PI) / 180;
   for (const z of world.zombies) {
     const d = dist(a.x, a.y, z.x, z.y);
@@ -102,7 +102,7 @@ function sense(world: World, a: Ally) {
     }
   }
   for (const [id, k] of a.known) if (world.time - k.t > 10) a.known.delete(id);
-  const p = world.player;
+  const p = leaderOf(world, a);
   if (p.alive && dist(a.x, a.y, p.x, p.y) < 14 * TILE && world.map.los(a.x, a.y, p.x, p.y)) {
     a.lastPlayerSeen = { x: p.x, y: p.y, t: world.time };
   }
@@ -128,7 +128,7 @@ export function updateAlly(world: World, a: Ally, dt: number) {
     a.senseT = 0.2;
     sense(world, a);
   }
-  const p = world.player;
+  const p = leaderOf(world, a);
 
   // ameaça mais próxima (somente zumbis que ele percebeu)
   const byId = new Map<string, Zombie>();
@@ -248,9 +248,15 @@ export function updateAlly(world: World, a: Ally, dt: number) {
 
 export type AllyCommand = 'seguir' | 'aguardar' | 'dar_kit' | 'estado';
 
+/** Sobrevivente que o aliado acompanha (quem deu a última ordem). */
+export function leaderOf(world: World, a: Ally) {
+  return world.playerById(a.leaderId) ?? world.players[0];
+}
+
 export function allyCommand(world: World, a: Ally, cmd: AllyCommand) {
   if (a.state === 'morto') return;
   const p = world.player;
+  a.leaderId = p.id;
   switch (cmd) {
     case 'seguir':
       a.mode = 'seguir';

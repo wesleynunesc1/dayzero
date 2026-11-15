@@ -966,6 +966,55 @@ export function drawProp(ctx: Ctx, p: Prop) {
       ctx.fillRect(x + 6, y - 5, 4, 1.5);
       break;
     }
+    case 'fuel_tank': {
+      ctx.fillStyle = '#4a4c4a';
+      roundRect(ctx, x + 2, y + 2, w - 4, h - 4, 3);
+      ctx.fill();
+      ctx.fillStyle = '#6a6c66';
+      ellipse(ctx, x + w / 2, y + h / 2, 5, 5);
+      ctx.fillStyle = '#8a3a2a';
+      ellipse(ctx, x + w / 2, y + h / 2, 2, 2);
+      break;
+    }
+    case 'fuel_pump': {
+      shadowRect(ctx, x + 4, y + 3, 8, 10, 1);
+      box(ctx, x + 4, y + 3, 8, 10, '#8a3a30', 1);
+      ctx.fillStyle = '#c8c4b8';
+      ctx.fillRect(x + 5.5, y + 5, 5, 3);
+      ctx.fillStyle = '#222';
+      ctx.fillRect(x + 11, y + 6, 2, 1);
+      break;
+    }
+    case 'radio_station': {
+      shadowRect(ctx, x, y + 1, w, h - 2, 1);
+      box(ctx, x, y + 1, w, h - 3, '#3e4448', 1);
+      ctx.fillStyle = '#5a7a5a';
+      ctx.fillRect(x + 3, y + 3, 6, 3);
+      ctx.fillStyle = '#c8b860';
+      for (let i = 0; i < 4; i++) ctx.fillRect(x + 12 + i * 4, y + 4, 2, 2);
+      ctx.strokeStyle = '#2a2c2e';
+      ctx.beginPath();
+      ctx.moveTo(x + w - 4, y + 2);
+      ctx.lineTo(x + w - 2, y - 6);
+      ctx.stroke();
+      break;
+    }
+    case 'lab_bench': {
+      shadowRect(ctx, x, y + 1, w, h - 2, 1);
+      box(ctx, x, y + 1, w, h - 3, '#9aa0a0', 1);
+      ctx.fillStyle = '#5a7a8a';
+      for (let i = 0; i < 5; i++) ellipse(ctx, x + 6 + i * 8, y + 6, 1.6, 1.6);
+      ctx.fillStyle = '#3a3c3e';
+      ctx.fillRect(x + w - 12, y + 3, 8, 6);
+      break;
+    }
+    case 'generator': {
+      shadowRect(ctx, x + 1, y + 2, w - 2, h - 3, 2);
+      box(ctx, x + 1, y + 2, w - 2, h - 4, '#a08a3a', 2);
+      ctx.fillStyle = '#3a3a3a';
+      ctx.fillRect(x + 4, y + 5, w - 8, 4);
+      break;
+    }
     case 'chest': {
       shadowRect(ctx, x + 1, y + 2, w - 2, h - 4, 1);
       box(ctx, x + 1, y + 2, w - 2, h - 4, '#6a4e34', 1);

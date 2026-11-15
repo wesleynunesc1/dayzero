@@ -71,6 +71,18 @@ export function zombieLook(rng: RNG, outfit?: string): Appearance {
     look.hair = rng.chance(0.5) ? '#2b3240' : look.hair;
   } else if (outfit === 'mercado') {
     look.overlay = { color: '#7a3f35', kind: 'apron' };
+  } else if (outfit === 'militar') {
+    look.shirt = '#4a5238';
+    look.pants = '#3e4430';
+    look.overlay = { color: '#3a3f2e', kind: 'vest' };
+    look.hairStyle = rng.chance(0.6) ? 3 : 2;
+    look.hair = '#3e4430';
+  } else if (outfit === 'medico') {
+    look.shirt = '#7f9a9a';
+    look.pants = '#6f8a8a';
+    look.overlay = { color: '#b8bcb8', kind: 'apron' };
+  } else if (outfit === 'cientista') {
+    look.overlay = { color: '#c4c6c0', kind: 'jacket' };
   } else if (outfit === 'operario') {
     look.shirt = '#6d5d3a';
     look.pants = '#4a4433';
@@ -92,6 +104,8 @@ export class Zombie extends Actor {
   lastKnownVel = { x: 0, y: 0 };
   awareness = 0;
   /** Segundos desde que viu o alvo pela última vez. */
+  /** Quem acertou por último (para missões/estatísticas). */
+  lastHitBy: string | null = null;
   lostT = 0;
   path: PathPoint[] | null = null;
   pathIdx = 0;

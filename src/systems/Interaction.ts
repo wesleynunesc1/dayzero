@@ -2,6 +2,9 @@ import { CONFIG, TILE } from '../config';
 import { createItem, itemDef } from '../data/items';
 import { angleDiff, dist } from '../engine/math';
 import { Ally } from '../entities/Ally';
+import type { Npc } from '../entities/Npc';
+import type { Player } from '../entities/Player';
+import { reviveOther } from './SurvivorBot';
 import { Vehicle } from '../entities/Vehicle';
 import { T } from '../world/tiles';
 import { Door } from '../world/TileMap';
@@ -27,6 +30,9 @@ export type Interactable =
   | { kind: 'vehicle'; label: string; x: number; y: number; vehicle: Vehicle }
   | { kind: 'exit_vehicle'; label: string; x: number; y: number; vehicle: Vehicle }
   | { kind: 'wake'; label: string; x: number; y: number }
+  | { kind: 'npc'; label: string; x: number; y: number; npc: Npc }
+  | { kind: 'special'; label: string; x: number; y: number; prop: Prop }
+  | { kind: 'revive'; label: string; x: number; y: number; target: Player }
   | { kind: 'shout'; label: string; x: number; y: number };
 
 const REACH = 16;
@@ -111,6 +117,12 @@ export function findInteractable(world: World): Interactable | null {
       consider({ kind: 'rest', label: sleepy ? `Dormir ${where}` : `Descansar ${where} (1 h)`, x: (pr.x + pr.w / 2) * TILE, y: (pr.y + pr.h / 2) * TILE, prop: pr, spot }, d, 1);
       continue;
     }
+    const sp = world.missions?.specialLabel(p, pr);
+    if (sp) {
+      const d = distToRect(p.x, p.y, pr.x, pr.y, pr.w, pr.h);
+      consider({ kind: 'special', label: sp, x: (pr.x + pr.w / 2) * TILE, y: (pr.y + pr.h / 2) * TILE, prop: pr }, d, 1);
+      continue;
+    }
     if (!pr.desc || pr.containerId) continue;
     if (world.waterSources.some((w) => w.x === pr.x && w.y === pr.y)) continue;
     const d = distToRect(p.x, p.y, pr.x, pr.y, pr.w, pr.h);
@@ -137,6 +149,18 @@ export function findInteractable(world: World): Interactable | null {
     if (a.state === 'morto') continue;
     const d = dist(p.x, p.y, a.x, a.y) - a.radius;
     consider({ kind: 'ally', label: `Falar com ${a.name}`, x: a.x, y: a.y, ally: a }, d - 2);
+  }
+  for (const n of world.npcs) {
+    if (n.state === 'morto' || Math.abs(n.x - p.x) > 40 || Math.abs(n.y - p.y) > 40) continue;
+    const d = dist(p.x, p.y, n.x, n.y) - n.radius;
+    // pela grade da cela também dá para conversar
+    if (d > 26) continue;
+    consider({ kind: 'npc', label: `Falar com ${n.name}`, x: n.x, y: n.y, npc: n }, Math.max(0, d - 10) - 2);
+  }
+  for (const o of world.players) {
+    if (o === p || !o.isDown || o.dead) continue;
+    const d = dist(p.x, p.y, o.x, o.y) - o.radius;
+    consider({ kind: 'revive', label: `Socorrer ${o.name}`, x: o.x, y: o.y, target: o }, d - 3);
   }
   return best;
 }
@@ -230,6 +254,17 @@ export function interact(world: World, it: Interactable) {
     case 'ally':
       world.events.emit('allyDialog', { allyId: it.ally.id });
       break;
+    case 'npc':
+      it.npc.talkingTo = p.id;
+      world.missions?.onEvent('conversa', { npc: it.npc.key, by: p.id });
+      world.events.emit('npcDialog', { npcId: it.npc.id });
+      break;
+    case 'special':
+      world.missions?.special(p, it.prop);
+      break;
+    case 'revive':
+      reviveOther(world, p, it.target);
+      break;
     case 'examine': {
       const pr = it.prop;
       let extra = '';
@@ -271,10 +306,16 @@ export function toggleDoor(world: World, door: Door, byPlayer: boolean): boolean
     if (byPlayer) world.msg('A porta está barricada.', 'warn');
     return false;
   }
+  if (door.locked && !door.open) {
+    if (byPlayer) {
+      if (!world.prison?.tryUnlock(world.player, door)) world.msg('Trancada.', 'warn');
+    }
+    return false;
+  }
   const cx = door.x * TILE + TILE / 2;
   const cy = door.y * TILE + TILE / 2;
   if (door.open) {
-    const blockers = [world.player, ...world.allies, ...world.zombies].filter(
+    const blockers = [...world.players, ...world.allies, ...world.npcs, ...world.zombies].filter(
       (a) => a.alive && Math.abs(a.x - cx) < TILE / 2 + a.radius - 1 && Math.abs(a.y - cy) < TILE / 2 + a.radius - 1,
     );
     if (blockers.length) {
@@ -529,7 +570,7 @@ export function nearestSiphonCar(world: World): Prop | null {
   let bd = 18;
   for (const pr of world.props) {
     if (pr.fuel === undefined || pr.burned) continue;
-    if (pr.kind !== 'car' && pr.kind !== 'van' && pr.kind !== 'car_police') continue;
+    if (pr.kind !== 'car' && pr.kind !== 'van' && pr.kind !== 'car_police' && pr.kind !== 'fuel_tank') continue;
     const d = distToRect(p.x, p.y, pr.x, pr.y, pr.w, pr.h);
     if (d < bd) {
       bd = d;

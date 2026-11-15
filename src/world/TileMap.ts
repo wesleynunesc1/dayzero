@@ -17,6 +17,8 @@ export interface Door {
   label: string;
   /** Painéis de barricada pregados (0..2). Barricada impede abrir e soma resistência. */
   barricades: number;
+  /** Trancada por uma facção (celas, paiol). Só abre com chave/grampo/arrombamento. */
+  locked?: string;
 }
 
 export const CHUNK = 32; // tiles por chunk de renderização

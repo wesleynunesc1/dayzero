@@ -183,9 +183,9 @@ export function exitSpot(world: World, v: Vehicle, radius: number): { x: number;
 /** Empurra pessoas para fora da carroceria (o veículo é um obstáculo para todos). */
 export function vehicleObstacles(world: World) {
   for (const v of world.vehicles) {
-    const actors = [world.player, ...world.allies, ...world.zombies];
+    const actors = [...world.players, ...world.allies, ...world.npcs, ...world.zombies];
     for (const a of actors) {
-      if (!a.alive || (a === world.player && world.player.vehicleId === v.id)) continue;
+      if (!a.alive || ('vehicleId' in a && (a as { vehicleId: string | null }).vehicleId === v.id)) continue;
       if (Math.abs(a.x - v.x) > 45 || Math.abs(a.y - v.y) > 45) continue;
       for (const c of v.circles()) {
         const dd = dist(c.x, c.y, a.x, a.y);

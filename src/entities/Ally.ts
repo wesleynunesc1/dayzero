@@ -4,7 +4,7 @@ import { PathPoint } from '../world/Pathfinder';
 import { Actor } from './Actor';
 
 export type AllyMode = 'aguardar' | 'seguir';
-export type AllyState = 'parado' | 'seguindo' | 'combate' | 'socorrendo' | 'recuando' | 'morto';
+export type AllyState = 'parado' | 'seguindo' | 'combate' | 'socorrendo' | 'recuando' | 'morto' | 'npc';
 
 export const ALLY_STATE_LABEL: Record<AllyState, string> = {
   parado: 'Aguardando',
@@ -13,6 +13,7 @@ export const ALLY_STATE_LABEL: Record<AllyState, string> = {
   socorrendo: 'Socorrendo',
   recuando: 'Recuando',
   morto: 'Morto',
+  npc: 'Por conta própria',
 };
 
 /** NPC aliado simples (base do futuro sistema de aliados). */
@@ -38,8 +39,10 @@ export class Ally extends Actor {
   doorT = 0;
   /** Recebeu um pedido de socorro (grito). */
   heardCall: { x: number; y: number; t: number } | null = null;
+  /** Sobrevivente que deu a última ordem (seguir/aguardar). */
+  leaderId: string | null = null;
 
-  constructor(x: number, y: number) {
+  constructor(x: number, y: number, fixedId?: string) {
     super('a', x, y, {
       skin: '#a8826a',
       hair: '#8d8a84',
@@ -49,7 +52,7 @@ export class Ally extends Actor {
       shoes: '#2a2624',
       overlay: { color: '#55606b', kind: 'jacket' },
       gore: 0,
-    });
+    }, fixedId);
     this.name = 'Elias';
     this.radius = 4.5;
     const pipe = createItem('cano_ferro', 1, 0.8);

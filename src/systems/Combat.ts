@@ -29,6 +29,7 @@ export function damageZombie(
   attacker: Actor | null,
 ) {
   if (z.hp <= 0) return;
+  if (attacker) z.lastHitBy = attacker.id;
   z.hp -= dmg;
   z.hurtFlash = 0.16;
   z.stagger = Math.max(z.stagger, 0.35);
@@ -57,6 +58,7 @@ export function killZombie(world: World, z: Zombie, dirX: number, dirY: number) 
   if (i >= 0) world.zombies.splice(i, 1);
   z.alive = false;
   world.stats.zombiesKilled++;
+  world.missions?.onZombieKilled(z.x, z.y, z.lastHitBy ?? null);
   world.sound('zdie', z.x, z.y, 0.8);
   world.addDecal({ x: z.x + dirX * 3, y: z.y + dirY * 3, kind: 'blood', r: world.rng.range(6, 9), rot: world.rng.range(0, 6), seed: world.rng.int(0, 99999) });
   world.createCorpse(z.x, z.y, Math.atan2(dirY, dirX), z.look, 'Corpo de infectado', world.zombieDrops(z), false, true);
@@ -91,6 +93,14 @@ export function meleeSwing(world: World, attacker: Actor, w: WeaponStats, facing
     if (z.knockedDown > 0 || z.crawler) dmg *= 1.3;
     damageZombie(world, z, dmg, attacker.x, attacker.y, w.knockback, w.knockdown, attacker);
     hits++;
+  }
+  if (!hits) {
+    // sem infectados no arco: pode acertar uma pessoa (NPC ou outro sobrevivente)
+    const h = humanInArc(world, attacker, facing, reach, w.arc);
+    if (h) {
+      damageHuman(world, h, w.damage * dmgMul * world.rng.range(0.85, 1.15), attacker, 'golpe');
+      hits++;
+    }
   }
   world.sound(hits ? (w.kind === 'unarmed' ? 'punch' : 'hit') : 'swing', attacker.x, attacker.y, 0.8);
   world.makeNoise(attacker.x, attacker.y, hits ? w.noise : Math.ceil(w.noise / 2), hits ? 'golpe' : 'golpe_ar', attacker instanceof Player, attacker.id);
@@ -135,6 +145,24 @@ export function fireGun(world: World, shooter: Actor, w: WeaponStats, aimAngle: 
       bestT = t;
     }
   }
+  // pessoas no caminho da bala (NPCs; outros sobreviventes só se o fogo amigo estiver ligado)
+  let bestH: Actor | null = null;
+  for (const h of world.humans()) {
+    if (h === shooter || h instanceof Zombie) continue;
+    if (h instanceof Player && !CONFIG.friendlyFire && shooter instanceof Player) continue;
+    if (h instanceof Ally && h.constructor === Ally && shooter instanceof Player) continue; // Elias se abaixa
+    const ox = h.x - sx;
+    const oy = h.y - sy;
+    const t = ox * dx + oy * dy;
+    if (t < 0 || t > bestT) continue;
+    const px = ox - dx * t;
+    const py = oy - dy * t;
+    if (px * px + py * py <= (h.radius + 1) ** 2) {
+      bestH = h;
+      bestT = t;
+    }
+  }
+  if (bestH) best = null;
   const ex = sx + dx * bestT;
   const ey = sy + dy * bestT;
   world.tracers.push({ x1: sx + dx * 7, y1: sy + dy * 7, x2: ex, y2: ey, t: 0.07 });
@@ -144,7 +172,9 @@ export function fireGun(world: World, shooter: Actor, w: WeaponStats, aimAngle: 
   // casca do cartucho
   world.addDecal({ x: sx + world.rng.range(-6, 6), y: sy + world.rng.range(-6, 6), kind: 'casing', r: 1, rot: world.rng.range(0, 6), seed: 1 });
   world.makeNoise(sx, sy, w.noise, 'disparo', shooter instanceof Player, shooter.id);
-  if (best) {
+  if (bestH) {
+    damageHuman(world, bestH, w.damage * world.rng.range(0.85, 1.2), shooter, 'tiro');
+  } else if (best) {
     damageZombie(world, best, w.damage * world.rng.range(0.85, 1.2), sx, sy, w.knockback, w.knockdown, shooter);
   } else {
     world.burst(ex, ey, 'spark', 4, '#d8c79a', 50);
@@ -171,7 +201,32 @@ export function zombieStrike(world: World, z: Zombie, target: Actor) {
   const rng = world.rng;
   z.attackAnim = 0.3;
   if (target instanceof Player) {
-    const p = target;
+    world.withPlayer(target, () => strikePlayer(world, z, target));
+    return;
+  }
+  if (target instanceof Ally) {
+    const a = target;
+    if (!rng.chance(0.65)) {
+      world.sound('swing', z.x, z.y, 0.6);
+      return;
+    }
+    const dmg = rng.range(7, 15);
+    a.hp -= dmg;
+    a.hurtFlash = 0.2;
+    a.stagger = 0.25;
+    const dx = a.x - z.x;
+    const dy = a.y - z.y;
+    const d = Math.hypot(dx, dy) || 1;
+    a.push(dx / d, dy / d, 35);
+    world.bloodSpray(a.x, a.y, dx / d, dy / d, 5);
+    world.sound('hurt', a.x, a.y, 0.8);
+    if (a.hp <= 0) killAlly(world, a);
+  }
+}
+
+function strikePlayer(world: World, z: Zombie, p: Player) {
+  const rng = world.rng;
+  {
     if (p.dead) return;
     // dentro do veículo: os golpes acertam a lataria, não o motorista
     const v = world.vehicleById(p.vehicleId);
@@ -232,25 +287,6 @@ export function zombieStrike(world: World, z: Zombie, target: Actor) {
     else if (type === 'mordida') world.msg('Uma mordida rasgou a pele, mas o vírus não foi transmitido. Trate o ferimento.', 'danger');
     else if (type === 'laceracao') world.msg(`${WOUND_LABEL[type]}! Você está sangrando.`, 'danger');
     else world.msg(wound.bleed > 0 ? 'Um infectado te arranhou. Está sangrando.' : 'Um infectado te arranhou de raspão.', 'warn');
-    return;
-  }
-  if (target instanceof Ally) {
-    const a = target;
-    if (!rng.chance(0.65)) {
-      world.sound('swing', z.x, z.y, 0.6);
-      return;
-    }
-    const dmg = rng.range(7, 15);
-    a.hp -= dmg;
-    a.hurtFlash = 0.2;
-    a.stagger = 0.25;
-    const dx = a.x - z.x;
-    const dy = a.y - z.y;
-    const d = Math.hypot(dx, dy) || 1;
-    a.push(dx / d, dy / d, 35);
-    world.bloodSpray(a.x, a.y, dx / d, dy / d, 5);
-    world.sound('hurt', a.x, a.y, 0.8);
-    if (a.hp <= 0) killAlly(world, a);
   }
 }
 
@@ -258,9 +294,10 @@ export function killAlly(world: World, a: Ally) {
   a.hp = 0;
   a.state = 'morto';
   a.alive = false;
+  world.onHumanDeath?.(a);
   world.addDecal({ x: a.x, y: a.y, kind: 'blood', r: 8, rot: 0, seed: 7 });
   world.createCorpse(a.x, a.y, a.facing, a.look, `Corpo de ${a.name}`, a.inv.items.splice(0), false, false);
-  world.msg(`${a.name} foi morto.`, 'danger');
+  world.msgNear(a.x, a.y, 40 * TILE, `${a.name} foi morto.`, 'danger');
 }
 
 export function cancelAction(world: World, p: Player) {
@@ -274,4 +311,57 @@ export function cancelAction(world: World, p: Player) {
 export function weaponName(p: Player): string {
   const it = p.weaponItem;
   return it ? itemDef(it.defId).name : 'Punhos';
+}
+
+/** Pessoa (NPC ou sobrevivente) dentro do arco de um golpe. */
+function humanInArc(world: World, attacker: Actor, facing: number, reach: number, arc: number): Actor | null {
+  let best: Actor | null = null;
+  let bd = Infinity;
+  for (const h of world.humans()) {
+    if (h === attacker) continue;
+    if (h instanceof Player && attacker instanceof Player && !CONFIG.friendlyFire) continue;
+    if (h instanceof Ally && h.constructor === Ally && attacker instanceof Player) continue;
+    const dx = h.x - attacker.x;
+    const dy = h.y - attacker.y;
+    const d = Math.hypot(dx, dy);
+    if (d > reach + h.radius) continue;
+    if (d > 4 && Math.abs(angleDiff(facing, Math.atan2(dy, dx))) > arc / 2) continue;
+    if (!world.map.los(attacker.x, attacker.y, h.x, h.y)) continue;
+    if (d < bd) {
+      bd = d;
+      best = h;
+    }
+  }
+  return best;
+}
+
+/**
+ * Dano entre humanos (NPC ↔ sobrevivente). Ferimento comum (laceração), nunca transmite o vírus.
+ * Avisa o sistema social (memória, reputação de facção) pelo gancho `world.onHumanHurt`.
+ */
+export function damageHuman(world: World, target: Actor, dmg: number, attacker: Actor | null, kind: 'golpe' | 'tiro') {
+  const dx = target.x - (attacker?.x ?? target.x);
+  const dy = target.y - (attacker?.y ?? target.y);
+  const d = Math.hypot(dx, dy) || 1;
+  world.bloodSpray(target.x, target.y, dx / d, dy / d, kind === 'tiro' ? 8 : 5);
+  world.sound('hurt', target.x, target.y, 0.9);
+  target.hurtFlash = 0.2;
+  target.stagger = Math.max(target.stagger, 0.3);
+  target.push(dx / d, dy / d, kind === 'tiro' ? 20 : 35);
+  world.onHumanHurt?.(target, attacker, dmg);
+  if (target instanceof Player) {
+    world.withPlayer(target, () => {
+      if (target.dead) return;
+      const armor = target.armor;
+      const real = dmg * (1 - armor.armor * 0.5);
+      target.health.damage(real);
+      if (kind === 'tiro' || world.rng.chance(0.5)) target.health.addWound('laceracao', 1);
+      world.events.emit('playerHurt', { amount: real, kind: 'laceracao' });
+      if (target.action) cancelAction(world, target);
+      world.msg(kind === 'tiro' ? `Você foi baleado${attacker && 'name' in attacker ? ` por ${(attacker as Actor & { name: string }).name}` : ''}!` : 'Você foi golpeado!', 'danger');
+    });
+  } else if (target instanceof Ally) {
+    target.hp -= dmg;
+    if (target.hp <= 0) killAlly(world, target);
+  }
 }

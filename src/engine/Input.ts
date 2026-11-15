@@ -22,7 +22,13 @@ export type Action =
   | 'opt1'
   | 'opt2'
   | 'opt3'
-  | 'opt4';
+  | 'opt4'
+  | 'opt5'
+  | 'opt6'
+  | 'opt7'
+  | 'opt8'
+  | 'talk'
+  | 'journal';
 
 const KEYMAP: Record<string, Action> = {
   KeyW: 'up',
@@ -47,6 +53,13 @@ const KEYMAP: Record<string, Action> = {
   Digit2: 'opt2',
   Digit3: 'opt3',
   Digit4: 'opt4',
+  Digit5: 'opt5',
+  Digit6: 'opt6',
+  Digit7: 'opt7',
+  Digit8: 'opt8',
+  Enter: 'talk',
+  KeyT: 'talk',
+  KeyJ: 'journal',
 };
 
 export class Input {

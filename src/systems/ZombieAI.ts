@@ -136,7 +136,7 @@ function bashDoor(world: World, z: Zombie, door: import('../world/TileMap').Door
       world.burst(cx, cy, 'splinter', 14, '#6b5139', 50);
     world.addDecal({ x: cx, y: cy, kind: 'splinters', r: 8, rot: world.rng.range(0, 6), seed: world.rng.int(0, 9999) });
     world.sound('door_break', cx, cy, 1);
-    if (dist(cx, cy, world.player.x, world.player.y) < 22 * TILE && world.time - lastBreakMsg > 15) {
+    if (world.nearestPlayerDist(cx, cy) < 22 * TILE && world.time - lastBreakMsg > 15) {
       lastBreakMsg = world.time;
       world.msg('Você ouve uma porta sendo arrombada.', 'danger');
     }
@@ -168,7 +168,7 @@ function bashWindow(world: World, z: Zombie, tx: number, ty: number, dt: number)
     world.burst(cx, cy, 'splinter', 12, '#6b5139', 50);
     world.addDecal({ x: cx, y: cy, kind: 'splinters', r: 8, rot: world.rng.range(0, 6), seed: world.rng.int(0, 9999) });
     world.sound('door_break', cx, cy, 1);
-    if (dist(cx, cy, world.player.x, world.player.y) < 22 * TILE) world.msg('Você ouve tábuas sendo arrancadas de uma janela.', 'danger');
+    world.msgNear(cx, cy, 22 * TILE, 'Você ouve tábuas sendo arrancadas de uma janela.', 'danger');
   }
 }
 
@@ -285,8 +285,7 @@ export function updateZombie(world: World, z: Zombie, dt: number) {
   if (z.attackCd > 0) z.attackCd -= dt;
   z.stateT += dt;
   z.thinkT += dt;
-  const p = world.player;
-  const dP = dist(z.x, z.y, p.x, p.y);
+  const dP = world.nearestPlayerDist(z.x, z.y);
   const lod = dP > AI.lodFar ? 2 : dP > AI.lodNear ? 1 : 0;
 
   if (z.knockedDown > 0) {

@@ -13,6 +13,8 @@ export type Category =
   | 'Equipamento'
   | 'Diversos'
   | 'Combustível'
+  | 'Missão'
+  | 'Documento'
   | 'Mapa';
 
 export interface WeaponStats {
@@ -82,7 +84,9 @@ export interface ItemDef {
   light?: { radius: number };
   radio?: boolean;
   batteries?: boolean;
-  map?: 'rasgado' | 'fragmento' | 'completo';
+  map?: 'rasgado' | 'fragmento' | 'completo' | 'regional' | 'fragmento_regional';
+  /** Texto legível (documentos da campanha). */
+  text?: string;
   /** Pode ser rasgado em N tiras de pano. */
   tearable?: number;
 }
@@ -178,12 +182,28 @@ const list: ItemDef[] = [
   { id: 'papel_higienico', name: 'Papel higiênico', category: 'Diversos', weight: 0.1, stack: 6, desc: 'Rolo de papel higiênico.' },
   { id: 'panela', name: 'Panela', category: 'Ferramenta', weight: 1.0, tool: true, desc: 'Panela de alumínio amassada. Serve para cozinhar e ferver água no fogo.' },
   { id: 'livro', name: 'Livro', category: 'Diversos', weight: 0.4, desc: 'Um romance policial com a capa rasgada.' },
+  { id: 'antibiotico', name: 'Antibiótico', category: 'Médico', weight: 0.05, desc: 'Caixa de amoxicilina. Trata infecção bacteriana de ferimentos — não tem efeito contra o vírus.', medical: { kind: 'antisseptico', uses: 3, quality: 0, time: 1 } },
+  { id: 'cigarros', name: 'Maço de cigarros', category: 'Diversos', weight: 0.03, stack: 10, desc: 'Moeda de troca valiosa entre sobreviventes.' },
+  { id: 'whisky', name: 'Garrafa de uísque', category: 'Diversos', weight: 0.9, desc: 'Meia garrafa. Vale mais em troca do que bebida.' },
   { id: 'fotografia', name: 'Fotografia', category: 'Diversos', weight: 0.01, desc: 'Uma família sorrindo em frente a esta casa. No verso: "Natal, 2019".' },
   { id: 'velas', name: 'Velas', category: 'Diversos', weight: 0.1, stack: 6, desc: 'Velas brancas.' },
   { id: 'caderno', name: 'Caderno', category: 'Diversos', weight: 0.2, desc: 'A última anotação diz: "Fomos para o abrigo da escola. Não esperem."' },
   // ---------- Mapas ----------
   { id: 'mapa_rasgado', name: 'Mapa do bairro (rasgado)', category: 'Mapa', weight: 0.05, desc: 'Mapa de papel da região. Falta um pedaço do lado leste.', map: 'rasgado' },
   { id: 'fragmento_mapa', name: 'Fragmento de mapa', category: 'Mapa', weight: 0.02, desc: 'Um pedaço rasgado de mapa. Parece encaixar em outro maior.', map: 'fragmento' },
+  { id: 'mapa_regional', name: 'Mapa regional', category: 'Mapa', weight: 0.08, desc: 'Mapa rodoviário de uma região. O estado do papel varia. Não mostra onde você está.', map: 'regional' },
+  { id: 'fragmento_regional', name: 'Pedaço de mapa regional', category: 'Mapa', weight: 0.02, desc: 'Um quarto de um mapa regional. Combine com outros pedaços da mesma região.', map: 'fragmento_regional' },
+  // ---------- Prisão ----------
+  { id: 'grampo', name: 'Grampo de metal', category: 'Ferramenta', weight: 0.01, tool: true, desc: 'Um grampo dobrado. Com paciência, abre fechaduras simples.' },
+  { id: 'chave_celas', name: 'Molho de chaves das celas', category: 'Ferramenta', weight: 0.15, tool: true, desc: 'Chaves do bloco de celas de uma facção.' },
+  // ---------- Campanha ----------
+  { id: 'prontuario_zero', name: 'Prontuário do paciente zero', category: 'Documento', weight: 0.1, desc: 'Prontuário do Hospital de Santa Aurora.', text: 'Paciente admitido com febre e agressividade 6 h após exposição em "visita técnica ao Instituto Vitalis". Amostras enviadas ao laboratório do Instituto. Observação manuscrita: "eles sabiam".' },
+  { id: 'relatorio_vitalis', name: 'Relatório do Instituto Vitalis', category: 'Documento', weight: 0.2, desc: 'Relatório interno do laboratório.', text: 'Projeto AURORA-7: vetor viral para regeneração tecidual. Falha de contenção no lote 12. A replicação depende de uma proteína sensível ao composto estabilizante R-4, estoque transferido à Base Sentinela. Síntese de contramedida requer: amostra viva, centrífuga, R-4 e energia estável.' },
+  { id: 'ordem_militar', name: 'Ordem de serviço militar', category: 'Documento', weight: 0.05, desc: 'Papel timbrado da Base Sentinela.', text: 'Transferência de 4 ampolas de R-4 para o paiol da base. Acesso restrito ao comando. Prioridade: contenção.' },
+  { id: 'amostra_viral', name: 'Amostra viral (refrigerada)', category: 'Missão', weight: 0.4, desc: 'Caixa térmica com amostras do paciente zero. Manuseie com cuidado.' },
+  { id: 'centrifuga', name: 'Centrífuga portátil', category: 'Missão', weight: 4.5, desc: 'Equipamento de laboratório pesado, porém transportável.' },
+  { id: 'reagente_r4', name: 'Estabilizante R-4', category: 'Missão', weight: 0.3, desc: 'Ampolas do composto R-4. Essenciais para a contramedida.' },
+  { id: 'vacina', name: 'Contramedida AURORA (protótipo)', category: 'Missão', weight: 0.2, desc: 'Primeiras doses sintetizadas. As regras de uso ainda dependem de validação (ver configuração).' },
   { id: 'mapa_completo', name: 'Mapa do bairro (remendado)', category: 'Mapa', weight: 0.06, desc: 'Mapa da região remendado com fita. Não mostra onde você está.', map: 'completo' },
 ];
 
@@ -214,6 +234,10 @@ export interface ItemInstance {
     contaminated?: boolean;
     /** Litros de combustível. */
     fuel?: number;
+    /** Mapas regionais: região, condição e quadrantes presentes (bits 1,2,4,8). */
+    region?: string;
+    cond?: string;
+    pieces?: number;
   };
 }
 
@@ -235,7 +259,7 @@ export function createItem(defId: string, qty = 1, conditionFactor = 1): ItemIns
   if (d.food?.perishable) item.state = { born: 0 };
   if (d.medical && d.medical.uses > 1) item.state = { uses: d.medical.uses };
   if (d.light) item.state = { on: false, battery: 60 };
-  if (d.radio) item.state = { on: false, battery: 0, freq: 104.5 };
+  if (d.radio) item.state = { on: false, battery: 0, freq: 1 };
   return item;
 }
 

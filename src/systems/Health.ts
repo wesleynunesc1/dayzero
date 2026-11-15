@@ -48,6 +48,8 @@ export class Health {
   wounds: Wound[] = [];
   /** Vírus zumbi transmitido (fatal). */
   infected = false;
+  /** Recebeu a vacina (efeito decidido por CONFIG.infection.afterVaccine). */
+  vaccinated = false;
   /** Segundos restantes até a morte, quando deathDelaySec > 0. */
   infectionTimer = 0;
   incapacitated = false;
@@ -102,7 +104,13 @@ export class Health {
       infected: false,
     };
     this.wounds.push(w);
-    const chance = CONFIG.infection.transmission[type] ?? 0;
+    let chance = CONFIG.infection.transmission[type] ?? 0;
+    // regra pós-vacina (configurável; ver CONFIG.infection.afterVaccine)
+    if (this.vaccinated) {
+      const rule = CONFIG.infection.afterVaccine;
+      if (rule === 'imune') chance = 0;
+      else if (rule === 'resistente') chance = Math.min(chance, CONFIG.infection.transmissaoResistente);
+    }
     if (!this.infected && transmitRoll < chance) {
       this.infected = true;
       this.infectionTimer = CONFIG.infection.deathDelaySec;

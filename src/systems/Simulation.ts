@@ -6,8 +6,18 @@ import { endSleep } from './Interaction';
 import { Actor } from '../entities/Actor';
 import { Ally } from '../entities/Ally';
 import { Zombie } from '../entities/Zombie';
-import type { PlayerCommand, World } from '../world/World';
+import { EMPTY_COMMAND, type PlayerCommand, type World } from '../world/World';
+import type { Player } from '../entities/Player';
 import { allyHear, updateAlly } from './AllyAI';
+import { factionDaily } from './Factions';
+import { Missions } from './Missions';
+import { updateNpcs, updateTerritories } from './NpcAI';
+import { PrisonSystem } from './Prison';
+import { RadioSystem } from './Radio';
+import { installSocialHooks } from './Social';
+import { botCommand, installBotChat } from './SurvivorBot';
+import { WorldSim } from './WorldSim';
+import type { DriveInput } from './VehicleSystem';
 import { NoiseSystem } from './Noise';
 import { integrate, separate } from './Physics';
 import { driveInput, updatePlayer } from './PlayerController';
@@ -16,14 +26,31 @@ import { updateZombie, zombieHear } from './ZombieAI';
 /** Orquestra a simulação em passo fixo. */
 export class Simulation {
   readonly noise: NoiseSystem;
+  readonly worldSim: WorldSim;
   /** Tempo médio gasto por passo (ms) — monitoramento de desempenho. */
   stepMs = 0;
+  /** Comando de direção de cada sobrevivente (veículos). */
+  private drive = new Map<string, DriveInput>();
+  private territoryT = 0;
 
   constructor(readonly world: World) {
     this.noise = new NoiseSystem(world);
+    this.worldSim = new WorldSim(world);
+    world.isActiveAt = (x, y) => this.worldSim.isActive(x, y);
+    world.prison ??= new PrisonSystem(world);
+    world.radio ??= new RadioSystem(world);
+    if (!world.missions) {
+      world.missions = new Missions(world);
+      world.missions.seedSideMissions();
+    }
+    installSocialHooks(world);
+    installBotChat(world);
     world.noiseHook = (n) => {
-      const listeners: Actor[] = [...world.zombies];
+      this.worldSim.noise(n.x, n.y, n.radius);
+      const listeners: Actor[] = [];
+      for (const z of world.zombies) if (this.worldSim.isActive(z.x, z.y)) listeners.push(z);
       for (const a of world.allies) if (a.state !== 'morto') listeners.push(a);
+      for (const a of world.npcs) if (a.state !== 'morto' && this.worldSim.isActive(a.x, a.y)) listeners.push(a);
       this.noise.emit(
         n,
         listeners,
@@ -34,14 +61,20 @@ export class Simulation {
         },
       );
       // barulho alheio por perto acorda quem está dormindo
-      const p = world.player;
-      if (p.sleep && !n.byPlayer && dist(n.x, n.y, p.x, p.y) < n.radius * TILE * 0.8 && n.radius >= 6) {
-        endSleep(world, n.kind === 'pancadas' ? 'Você acordou com pancadas na porta!' : 'Um barulho te acordou.');
+      for (const p of world.players) {
+        if (p.sleep && n.sourceId !== p.id && dist(n.x, n.y, p.x, p.y) < n.radius * TILE * 0.8 && n.radius >= 6) {
+          world.withPlayer(p, () => endSleep(world, n.kind === 'pancadas' ? 'Você acordou com pancadas na porta!' : 'Um barulho te acordou.'));
+        }
       }
     };
+    this.worldSim.refreshCells();
   }
 
-  step(dt: number, cmd: PlayerCommand) {
+  /**
+   * Um passo da simulação. `cmd` pode ser o comando do jogador local (modo offline)
+   * ou um mapa id→comando com os humanos conectados (servidor). Vagas sem humano: IA.
+   */
+  step(dt: number, cmd: PlayerCommand | Map<string, PlayerCommand>) {
     const t0 = performance.now();
     const w = this.world;
     w.time += dt;
@@ -51,27 +84,52 @@ export class Simulation {
     const changed = w.weather.update(dt, hours);
     if (changed) {
       w.events.emit('weatherChanged', { kind: changed });
-      if (!w.player.sleep) w.msg(changed === 'chuva' ? 'Começou a chover. A chuva abafa os sons.' : changed === 'neblina' ? 'Uma neblina baixa toma o bairro. Difícil enxergar longe.' : `${WEATHER_LABEL[changed]}.`, 'info');
+      w.msgAll(changed === 'chuva' ? 'Começou a chover. A chuva abafa os sons.' : changed === 'neblina' ? 'Uma neblina baixa toma o bairro. Difícil enxergar longe.' : `${WEATHER_LABEL[changed]}.`, 'info');
     }
     // barris de chuva enchem
     if (w.weather.rain > 0.05) {
       for (const s of w.waterSources) if (s.collectsRain) s.liters = Math.min(s.capacity, s.liters + CONFIG.weather.rainBarrelLitersPerHour * w.weather.rain * hours);
     }
 
-    updatePlayer(w, cmd, dt);
-    for (const v of w.vehicles) updateVehicle(w, v, v.occupant === w.player.id ? driveInput : null, dt);
+    const ctx = w.player;
+    const cmds = cmd instanceof Map ? cmd : new Map([[w.localId, cmd]]);
+    this.worldSim.update(dt);
+    for (const p of w.players) {
+      const active = this.worldSim.isActive(p.x, p.y);
+      const human = p.controller === 'humano';
+      const c = human ? cmds.get(p.id) ?? EMPTY_COMMAND : botCommand(w, p, dt, active);
+      w.withPlayer(p, () => updatePlayer(w, c, dt));
+      this.drive.set(p.id, { throttle: driveInput.throttle, steer: driveInput.steer });
+    }
+    for (const v of w.vehicles) updateVehicle(w, v, v.occupant ? this.drive.get(v.occupant) ?? null : null, dt);
     for (const a of w.allies) updateAlly(w, a, dt);
-    for (const z of w.zombies) updateZombie(w, z, dt);
+    updateNpcs(w, dt, (x, y) => this.worldSim.isActive(x, y));
+    for (const z of w.zombies) if (this.worldSim.isActive(z.x, z.y)) updateZombie(w, z, dt);
 
-    if (w.player.alive && !w.player.vehicleId) integrate(w, w.player, dt);
+    for (const p of w.players) if (p.alive && !p.vehicleId && (p.controller === 'humano' || this.worldSim.isActive(p.x, p.y))) integrate(w, p, dt);
     for (const a of w.allies) if (a.state !== 'morto') integrate(w, a, dt);
-    for (const z of w.zombies) integrate(w, z, dt);
+    for (const n of w.npcs) if (n.state !== 'morto' && (this.worldSim.isActive(n.x, n.y) || n.followId)) integrate(w, n, dt);
+    for (const z of w.zombies) if (this.worldSim.isActive(z.x, z.y)) integrate(w, z, dt);
     separate(w);
     vehicleObstacles(w);
-    const pv = w.vehicleById(w.player.vehicleId);
-    if (pv) {
-      w.player.x = pv.x;
-      w.player.y = pv.y;
+    for (const p of w.players) {
+      const pv = w.vehicleById(p.vehicleId);
+      if (pv) {
+        p.x = pv.x;
+        p.y = pv.y;
+      }
+    }
+    w.player = ctx;
+
+    // sistemas sociais e de campanha
+    w.prison!.update();
+    w.radio!.update(dt);
+    w.missions!.update(dt);
+    this.territoryT -= dt;
+    if (this.territoryT <= 0) {
+      this.territoryT = 1;
+      updateTerritories(w);
+      factionDaily(w, (1 * CONFIG.time.minutesPerSecond) / 60);
     }
 
     // portas (animação)

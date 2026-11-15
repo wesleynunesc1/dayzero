@@ -1,3 +1,7 @@
+import { runAction, type ActionResult } from '../net/Actions';
+import { NetClient } from '../net/NetClient';
+import type { Mode } from '../net/protocol';
+import { applySnapshot, clientTick } from '../net/Sync';
 import { CONFIG, RespawnMode, TILE } from '../config';
 import { createItem } from '../data/items';
 import { AudioSystem } from '../engine/Audio';
@@ -45,6 +49,76 @@ export class Game implements UIHost {
   timeScale = 1;
   showStats = false;
   private autosaveT = 0;
+  /** Conexão com servidor (modo online). Null = jogo local. */
+  net: NetClient | null = null;
+  private pingT = 0;
+
+  // ------------------------------------------------------------------ multijogador
+  async connectServer(url: string, name: string) {
+    this.net?.close();
+    const net = new NetClient();
+    this.net = net;
+    net.onLobby = (st) => this.state === 'title' && this.ui.showLobby(st, '');
+    net.onError = (m) => (this.state === 'title' ? this.ui.showLobby(net.lobby, m) : this.world.msg(m, 'warn'));
+    net.onFull = (save, you) => this.enterOnline(save, you);
+    net.onSnap = (s) => this.world && this.world.localId === net.you && applySnapshot(this.world, s);
+    net.onEvents = (evs) => {
+      for (const e of evs) this.world.events.emit(e.k as never, e.p as never);
+    };
+    net.onClose = () => {
+      if (this.net !== net) return;
+      this.net = null;
+      if (this.state !== 'title') {
+        this.world.msg('Conexão com o servidor perdida. Volte ao menu e conecte de novo: seu personagem continua no mundo (a IA assumiu).', 'danger');
+        this.state = 'paused';
+        this.ui.showPause(true);
+      } else this.ui.showLobby(null, 'Conexão encerrada.');
+    };
+    await net.connect(url, name);
+  }
+
+  pickSlot(slot: number) {
+    this.net?.pick(slot);
+  }
+
+  setMode(mode: Mode) {
+    this.net?.setMode(mode);
+  }
+
+  startOnline() {
+    if (!this.net) return;
+    if (this.net.lobby?.started) {
+      // já começou: pede o estado completo de novo escolhendo a própria vaga
+      const me = this.net.lobby.slots.find((s) => s.playerId === this.net!.lobby!.you);
+      if (me) this.net.pick(me.slot);
+    } else this.net.start();
+  }
+
+  /** Recebeu o mundo completo do servidor: monta o mundo local (somente exibição). */
+  private enterOnline(save: SaveData, you: string) {
+    this.audio.init();
+    this.newWorld(save.seed);
+    applySave(this.world, save);
+    this.world.localId = you;
+    this.world.player = this.world.localPlayer;
+    this.renderer.setWorld(this.world);
+    this.camera.follow(this.world.player.x, this.world.player.y, 0, true);
+    this.state = this.world.player.dead ? 'dead' : 'playing';
+    this.canvas.classList.toggle('menu', this.state !== 'playing');
+    this.ui.showTitle(false);
+    this.ui.showPause(false);
+    this.world.msg(`Conectado: você é ${this.world.player.name}. O mapa não mostra os outros — use o rádio.`, 'good');
+  }
+
+  get online() {
+    return !!this.net;
+  }
+
+  /** Ação discreta: no servidor (online) ou direto no mundo local. */
+  async act(name: string, ...args: unknown[]): Promise<ActionResult> {
+    if (this.net) return this.net.request(name, args);
+    return runAction(this.world, this.world.localId, name, args);
+  }
   private saveRequestT = -1;
 
   constructor(root: HTMLElement) {
@@ -111,6 +185,10 @@ export class Game implements UIHost {
   }
 
   saveGame(auto = false): boolean {
+    if (this.net) {
+      if (!auto) this.world.msg('No multijogador o servidor salva o mundo automaticamente.', 'info');
+      return true;
+    }
     if (this.state === 'title' || !this.world.player.alive) return false;
     const ok = saveToStorage(this.world);
     if (ok) {
@@ -173,7 +251,8 @@ export class Game implements UIHost {
   }
 
   respawn() {
-    respawnPlayer(this.world);
+    if (this.net) void this.act('respawn');
+    else respawnPlayer(this.world);
     this.ui.showDeath(null);
     this.saveGame(true);
     this.state = 'playing';
@@ -230,6 +309,14 @@ export class Game implements UIHost {
       return;
     }
     if (this.state !== 'playing') return;
+    if (inp.consume('talk') && !this.ui.isModalOpen()) {
+      this.ui.panels.openTalk();
+      inp.releaseAll();
+      return;
+    }
+    if (inp.consume('journal')) this.ui.panels.toggleJournal();
+    const opts = ['opt1', 'opt2', 'opt3', 'opt4', 'opt5', 'opt6', 'opt7', 'opt8'] as const;
+    for (let i = 0; i < opts.length; i++) if (this.ui.panels.chooseIndex(-1) && inp.consume(opts[i])) this.ui.panels.chooseIndex(i);
     if (this.ui.dialogOpen()) {
       for (const [a, i] of [
         ['opt1', 0],
@@ -285,6 +372,30 @@ export class Game implements UIHost {
     this.stepsThisFrame = 0;
     if (this.state === 'paused') return;
 
+    if (this.net) {
+      // ONLINE: o servidor simula; aqui só enviamos comandos e interpolamos o que chega
+      if (this.state === 'playing') this.net.sendCmd(this.buildCommand(), dt);
+      this.pingT -= dt;
+      if (this.pingT <= 0) {
+        this.pingT = 2;
+        this.net.ping();
+      }
+      clientTick(w, dt);
+      this.stepsThisFrame = 1;
+      const p = w.player;
+      this.camera.follow(p.x, p.y, dt);
+      this.target = this.state === 'playing' && p.alive ? findInteractable(w) : null;
+      this.audio.setRain(w.weather.rain);
+      if (this.deathTimer > 0) {
+        this.deathTimer -= dt;
+        if (this.deathTimer <= 0) {
+          this.state = 'dead';
+          this.canvas.classList.add('menu');
+          this.ui.showDeath(p.health.deathCause);
+        }
+      }
+      return;
+    }
     // dormindo: o tempo do mundo corre acelerado (simulação real, passo a passo)
     if (this.state === 'playing' && w.player.sleep && this.timeScale > 0) {
       const wake = this.input.consume('interact');

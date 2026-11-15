@@ -92,13 +92,19 @@ export function playerItemActions(world: World, it: ItemInstance): ItemAction[] 
     const e = findEntrance(world);
     out.push({ id: 'barricade', label: 'Instalar na entrada à frente', enabled: !busy && !!e && p.inv.count('martelo') > 0, reason: p.inv.count('martelo') === 0 ? 'Precisa de um martelo.' : 'Fique de frente para uma porta fechada ou janela.', primary: true });
   }
-  if (d.map) {
+  if (d.map === 'regional' || d.map === 'fragmento_regional') {
+    out.push({ id: 'read_map', label: 'Ver mapa', enabled: true, primary: true });
+    const mate = regionalMate(p, it);
+    out.push({ id: 'combine_regional', label: 'Juntar com outro pedaço da mesma região', enabled: !!mate && !busy, reason: 'Você não tem outro pedaço dessa região.' });
+  } else if (d.map) {
     out.push({ id: 'read_map', label: 'Ver mapa', enabled: true, primary: true });
     if (d.map === 'fragmento' || d.map === 'rasgado') {
       const other = d.map === 'fragmento' ? 'mapa_rasgado' : 'fragmento_mapa';
       out.push({ id: 'combine_map', label: 'Combinar fragmento', enabled: p.inv.count(other) > 0 && !busy, reason: d.map === 'fragmento' ? 'Você não tem o mapa principal.' : 'Você não tem o fragmento.' });
     }
   }
+  if (d.text && !d.map) out.push({ id: 'read', label: 'Ler', enabled: !busy, primary: true });
+  if (it.defId === 'vacina') out.push({ id: 'aplicar', label: 'Aplicar uma dose em si', enabled: !busy && !p.health.vaccinated, reason: 'Você já recebeu uma dose.' });
   if (d.tearable) out.push({ id: 'tear', label: 'Rasgar em tiras', enabled: !busy && !eq });
   out.push({ id: 'examine', label: 'Examinar', enabled: true });
   if (p.openContainer) out.push({ id: 'store', label: 'Guardar', enabled: !busy });
@@ -135,8 +141,8 @@ export function describeItem(it: ItemInstance, now = 0): string {
   if (d.light) parts.push(`Estado: ${it.state?.on ? 'ligada' : 'desligada'}. Bateria: ${Math.round(it.state?.battery ?? 0)}%.`);
   if (d.radio)
     parts.push(
-      `Estado: ${it.state?.on ? 'ligado' : 'desligado'}. Bateria: ${Math.round(it.state?.battery ?? 0)}%. Frequência: ${(it.state?.freq ?? 104.5).toLocaleString('pt-BR', { minimumFractionDigits: 1 })} MHz. ` +
-        'Sem outros sobreviventes na escuta, por enquanto.',
+      `Estado: ${(it.condition ?? 1) < 0.15 ? 'danificado' : it.state?.on ? 'ligado' : 'desligado'}. Bateria: ${Math.round(it.state?.battery ?? 0)}%. Canal ${it.state?.freq ?? 1} de 8. ` +
+        `Alcance de um portátil: ~${CONFIG.radio.rangeTiles} m em terreno aberto (montanhas e chuva atrapalham). Para transmitir, aperte Enter e escolha "Rádio".`,
     );
   if (d.backpack) parts.push(`Capacidade extra: +${formatKg(d.backpack.weight)} kg, +${d.backpack.slots} espaços.`);
   if (d.wear && (d.wear.armor > 0 || d.wear.biteProtect > 0)) parts.push(`Proteção: ${Math.round(d.wear.armor * 100)}% contra golpes, ${Math.round(d.wear.biteProtect * 100)}% contra mordidas.`);
@@ -176,6 +182,12 @@ function groundPile(world: World): Container {
   return c.container;
 }
 
+/** Outro pedaço/mapa regional da MESMA região, para juntar. */
+function regionalMate(p: Player, it: ItemInstance): ItemInstance | null {
+  if (!it.state?.region) return null;
+  return p.inv.items.find((o) => o.uid !== it.uid && (o.defId === 'mapa_regional' || o.defId === 'fragmento_regional') && o.state?.region === it.state!.region && ((o.state?.pieces ?? 0) & (it.state!.pieces ?? 0)) === 0) ?? null;
+}
+
 export function doPlayerItemAction(world: World, actionId: string, uid: string): void {
   const p = world.player;
   const it = p.inv.get(uid);
@@ -186,6 +198,7 @@ export function doPlayerItemAction(world: World, actionId: string, uid: string):
 
   switch (actionId) {
     case 'consume': {
+      world.missions?.onEvent('comeu', { by: p.id });
       const f = d.food!;
       const drink = f.verb === 'Beber';
       startAction(world, 'consume', drink ? 'Bebendo' : 'Comendo', drink ? 0.9 : 1.4, () => {
@@ -322,17 +335,17 @@ export function doPlayerItemAction(world: World, actionId: string, uid: string):
       }
       it.state.on = !it.state.on;
       world.sound('pickup', p.x, p.y, 0.4);
-      if (d.radio) world.msg(it.state.on ? 'O rádio chia. Somente estática.' : 'Rádio desligado.');
+      if (d.radio) world.msg(it.state.on ? `Rádio ligado no canal ${it.state.freq ?? 1}. Chiado baixo.` : 'Rádio desligado.');
       else world.msg(it.state.on ? 'Lanterna ligada.' : 'Lanterna desligada.');
       changed();
       break;
     }
     case 'tune': {
       if (!it.state) return;
-      const freqs = [88.1, 92.7, 96.3, 101.9, 104.5, 107.9];
-      const i = freqs.indexOf(it.state.freq ?? 104.5);
+      const freqs = CONFIG.radio.frequencies;
+      const i = freqs.indexOf(it.state.freq ?? 1);
       it.state.freq = freqs[(i + 1) % freqs.length];
-      world.msg(`Sintonizado em ${it.state.freq.toLocaleString('pt-BR', { minimumFractionDigits: 1 })} MHz. Somente estática.`);
+      world.msg(`Sintonizado no canal ${it.state.freq}.`);
       changed();
       break;
     }
@@ -390,7 +403,46 @@ export function doPlayerItemAction(world: World, actionId: string, uid: string):
       installBarricade(world);
       break;
     case 'read_map':
-      world.events.emit('openMap', {});
+      world.events.emit('openMap', { uid });
+      break;
+    case 'combine_regional': {
+      const mate = regionalMate(p, it);
+      if (!mate) return;
+      startAction(world, 'combine', 'Juntando os pedaços do mapa', 1.6, () => {
+        const a = p.inv.get(uid);
+        const b = p.inv.get(mate.uid);
+        if (!a || !b) return;
+        const main = itemDef(a.defId).map === 'regional' ? a : itemDef(b.defId).map === 'regional' ? b : a;
+        const other = main === a ? b : a;
+        const pieces = (main.state!.pieces ?? 0) | (other.state!.pieces ?? 0);
+        p.inv.remove(other.uid, 1);
+        if (itemDef(main.defId).map !== 'regional') {
+          // dois pedaços soltos viram um mapa (ainda incompleto)
+          p.inv.remove(main.uid, 1);
+          p.inv.add(Object.assign(createItem('mapa_regional'), { state: { region: main.state!.region, cond: 'rasgado', pieces } }));
+        } else {
+          main.state!.pieces = pieces;
+          if (pieces === 15 && main.state!.cond === 'rasgado') main.state!.cond = 'completo';
+        }
+        world.sound('cloth', p.x, p.y, 0.5);
+        world.msg(pieces === 15 ? 'O mapa da região está completo (com fita adesiva e paciência).' : 'Você juntou os pedaços. Ainda falta parte do mapa.', 'good');
+        changed();
+      });
+      break;
+    }
+    case 'read':
+      world.msg(`${d.name}: “${d.text}”`, 'info');
+      world.missions?.onEvent('documento_lido', { id: it.defId, by: p.id });
+      break;
+    case 'aplicar':
+      startAction(world, 'consume', 'Aplicando a dose', 2.5, () => {
+        const cur = p.inv.get(uid);
+        if (!cur) return;
+        p.inv.remove(uid, 1);
+        p.health.vaccinated = true;
+        world.msg(`Dose aplicada. Efeito definido pela regra em vigor: ${({ imune: 'mordidas não transmitem mais o vírus', resistente: 'chance reduzida de transmissão', sem_efeito: 'nenhum efeito sobre a infecção (protótipo)' } as Record<string, string>)[CONFIG.infection.afterVaccine]}.`, 'good');
+        changed();
+      });
       break;
     case 'combine_map':
       startAction(world, 'combine', 'Juntando os pedaços do mapa', 1.6, () => {

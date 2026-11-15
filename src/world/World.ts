@@ -4,13 +4,16 @@ import { EventBus } from '../engine/EventBus';
 import { dist2, RNG } from '../engine/math';
 import { Actor, Appearance } from '../entities/Actor';
 import { Ally } from '../entities/Ally';
-import { Player } from '../entities/Player';
+import { Npc } from '../entities/Npc';
+import { NPC_DEFS } from '../data/npcs';
+import { createFactions, type Faction } from '../systems/Factions';
+import { Player, SURVIVORS } from '../entities/Player';
 import { Zombie, zombieLook } from '../entities/Zombie';
 import { Vehicle, VEHICLE_DEFS } from '../entities/Vehicle';
 import { WeatherController } from '../systems/Weather';
 import { Inventory } from '../systems/Inventory';
 import { WoundType } from '../systems/Health';
-import { buildNeighborhood } from './MapBuilder';
+import { buildWorld, FactionSite, NpcSpawn, Poi, PrisonSite, Town, WorldExtras } from './WorldGen';
 import { Pathfinder } from './Pathfinder';
 import { TileMap } from './TileMap';
 import { TILES } from './tiles';
@@ -57,7 +60,8 @@ export type SoundName =
   | 'engine_stop';
 
 export interface WorldEvents {
-  message: { text: string; tone: Tone };
+  /** `to`: id do sobrevivente destinatário (undefined = todos). */
+  message: { text: string; tone: Tone; to?: string };
   noise: { x: number; y: number; radius: number; kind: string; byPlayer: boolean };
   sound: { name: SoundName; x: number; y: number; vol: number };
   playerHurt: { amount: number; kind: WoundType | 'golpe' };
@@ -67,7 +71,7 @@ export interface WorldEvents {
   openContainer: { id: string };
   closeContainer: Record<string, never>;
   shot: { x: number; y: number };
-  openMap: Record<string, never>;
+  openMap: { uid?: string };
   allyDialog: { allyId: string };
   vehicleEnter: { id: string };
   vehicleExit: { id: string };
@@ -77,6 +81,12 @@ export interface WorldEvents {
   saved: { auto: boolean };
   /** Pede um salvamento (após fabricar, guardar no abrigo, dormir...). */
   requestSave: Record<string, never>;
+  radio: { to: string; from: string; freq: number; text: string; quality: number };
+  radioSent: { from: string; freq: number; text: string };
+  localSpeech: { from: string; text: string; shout: boolean };
+  npcDialog: { npcId: string };
+  campaign: { chapter: number; title: string; text: string };
+  mission: { id: string; status: string; title: string };
 }
 
 export interface Particle {
@@ -184,7 +194,16 @@ export class World {
   buildings: Building[];
   safePoints: SafePoint[];
   labels: MapLabel[];
+  /**
+   * Sobrevivente em CONTEXTO. Os sistemas (inventário, interação, itens...) agem sobre
+   * `world.player`; a simulação troca o contexto para cada sobrevivente a cada passo
+   * (ver `withPlayer`). No cliente, fora da simulação, aponta para o jogador local.
+   */
   player: Player;
+  /** Todos os sobreviventes do grupo (1–4 humanos; vagas vazias controladas pela IA). */
+  players: Player[] = [];
+  /** Id do sobrevivente controlado neste computador (cliente). */
+  localId = 'p0';
   zombies: Zombie[] = [];
   allies: Ally[] = [];
   corpses: Corpse[] = [];
@@ -204,6 +223,14 @@ export class World {
   windowHp = new Map<number, number>();
   /** Tile original (vidro inteiro ou quebrado) de janelas que receberam tábuas. */
   boardedFrom = new Map<number, number>();
+  towns: Town[];
+  pois: Poi[];
+  prisons: PrisonSite[];
+  factionSites: FactionSite[];
+  npcSpawns: NpcSpawn[];
+  starts: WorldExtras['starts'];
+  lab: WorldExtras['lab'];
+  radioTower: WorldExtras['radioTower'];
   /** Semente usada para construir o mapa (necessária para carregar o save). */
   readonly seed: number;
   /** Estatísticas exibidas e úteis em testes. */
@@ -211,13 +238,34 @@ export class World {
   private corpseSeq = 0;
   /** Destino compartilhado de cada horda (id -> ponto). */
   hordes = new Map<number, { x: number; y: number; t: number }>();
+  /** Facções humanas (Etapa 3). */
+  factions = new Map<string, Faction>();
+  /** NPCs com identidade (Etapa 3). */
+  npcs: Npc[] = [];
+  /** Missões (campanha + secundárias) e prisão: ligados pela Simulação. */
+  missions: import('../systems/Missions').Missions | null = null;
+  prison: import('../systems/Prison').PrisonSystem | null = null;
+  radio: import('../systems/Radio').RadioSystem | null = null;
+  /** Estado das hordas em escala de mundo (WorldSim). */
+  hordeSim: Map<number, import('../systems/WorldSim').HordeState> | null = null;
+  /** Ganchos do sistema social/facções (ligados pela Simulação). */
+  onHumanHurt: ((target: Actor, attacker: Actor | null, dmg: number) => void) | null = null;
+  onHumanDeath: ((a: Actor) => void) | null = null;
   /** Conectado pela Simulação: propaga ruídos aos ouvintes. */
   noiseHook: ((n: NoiseEvent) => void) | null = null;
 
   constructor(seed = CONFIG.seed) {
     this.seed = seed;
     this.rng = new RNG(seed);
-    const b = buildNeighborhood(seed);
+    const b = buildWorld(seed);
+    this.towns = b.towns;
+    this.pois = b.pois;
+    this.prisons = b.prisons;
+    this.factionSites = b.factionSites;
+    this.npcSpawns = b.npcSpawns;
+    this.starts = b.starts;
+    this.lab = b.lab;
+    this.radioTower = b.radioTower;
     this.waterSources = b.waterSources;
     this.weather = new WeatherController(this.rng);
     b.vehicles.forEach((v, i) => this.vehicles.push(new Vehicle(`v${i}`, VEHICLE_DEFS[v.def], v.x, v.y, v.angle, v.fuel)));
@@ -233,10 +281,35 @@ export class World {
     this.labels = b.labels;
     this.playerStart = b.playerStart;
     this.pathfinder = new Pathfinder(this.map);
-    this.player = new Player(b.playerStart.x, b.playerStart.y);
-    this.player.facing = -Math.PI / 2;
+    // quatro sobreviventes, cada um numa região diferente
+    for (const def of SURVIVORS) {
+      const st = def.region === 'oeste' ? { x: b.playerStart.x, y: b.playerStart.y } : (() => {
+        const s0 = b.starts.find((s) => s.region === def.region)!;
+        return { x: s0.x * TILE + TILE / 2, y: s0.y * TILE + TILE / 2 };
+      })();
+      const pl = new Player(st.x, st.y, def);
+      pl.facing = -Math.PI / 2;
+      pl.controller = def.slot === 0 ? 'humano' : 'ia';
+      pl.connected = def.slot === 0;
+      this.players.push(pl);
+    }
+    this.player = this.players[0];
     this.allies.push(new Ally(b.allyStart.x, b.allyStart.y));
     for (const s of b.zombies) this.spawnZombie(s.x * TILE, s.y * TILE, s.type, s.outfit, s.horde ?? -1);
+    // facções e NPCs com identidade
+    this.factions = createFactions(this);
+    for (const sp of b.npcSpawns) {
+      const def = NPC_DEFS[sp.key];
+      if (!def) continue;
+      const n = new Npc(def, sp.x * TILE, sp.y * TILE, sp.role as Npc['role'], sp.faction ?? null);
+      this.npcs.push(n);
+      if (n.faction && n.role !== 'prisioneiro') this.factions.get(n.faction)?.members.push(n.id);
+      if (n.role === 'prisioneiro') {
+        const pr = this.prisons.find((p) => p.faction === n.faction);
+        const tx = Math.floor(sp.x);
+        n.cell = pr ? pr.cells.findIndex((c) => tx >= c.x0 && tx <= c.x1) : null;
+      }
+    }
   }
 
   spawnZombie(x: number, y: number, type: Zombie['ztype'], outfit?: string, horde = -1): Zombie {
@@ -281,8 +354,52 @@ export class World {
     return id ? this.vehicles.find((v) => v.id === id) ?? null : null;
   }
 
+  /** Mensagem para o sobrevivente em contexto. */
   msg(text: string, tone: Tone = 'info') {
+    this.events.emit('message', { text, tone, to: this.player.id });
+  }
+
+  /** Mensagem para todos os sobreviventes. */
+  msgAll(text: string, tone: Tone = 'info') {
     this.events.emit('message', { text, tone });
+  }
+
+  /** Mensagem para quem estiver perto de um ponto (algo que se ouve/vê no local). */
+  msgNear(x: number, y: number, rangePx: number, text: string, tone: Tone = 'info') {
+    for (const p of this.players) if (p.alive && Math.hypot(p.x - x, p.y - y) < rangePx) this.events.emit('message', { text, tone, to: p.id });
+  }
+
+  /** Célula ativa (perto de um jogador humano)? Fornecido pela Simulação (WorldSim). */
+  isActiveAt: (x: number, y: number) => boolean = () => true;
+
+  /** Executa `fn` com `p` como sobrevivente em contexto e restaura o anterior. */
+  withPlayer<R>(p: Player, fn: () => R): R {
+    const prev = this.player;
+    this.player = p;
+    try {
+      return fn();
+    } finally {
+      this.player = prev;
+    }
+  }
+
+  get localPlayer(): Player {
+    return this.players.find((p) => p.id === this.localId) ?? this.players[0];
+  }
+
+  playerById(id: string | null | undefined): Player | undefined {
+    return id ? this.players.find((p) => p.id === id) : undefined;
+  }
+
+  /** Distância até o sobrevivente vivo mais próximo. */
+  nearestPlayerDist(x: number, y: number): number {
+    let best = Infinity;
+    for (const p of this.players) {
+      if (p.dead) continue;
+      const d = Math.hypot(p.x - x, p.y - y);
+      if (d < best) best = d;
+    }
+    return best;
   }
 
   sound(name: SoundName, x: number, y: number, vol = 1) {
@@ -292,15 +409,17 @@ export class World {
   /** Humanos vivos que podem ser alvo dos zumbis. */
   humans(): Actor[] {
     const out: Actor[] = [];
-    if (!this.player.dead) out.push(this.player);
+    for (const p of this.players) if (!p.dead) out.push(p);
     for (const a of this.allies) if (a.state !== 'morto') out.push(a);
+    for (const n of this.npcs) if (n.state !== 'morto') out.push(n);
     return out;
   }
 
   actorById(id: string | null): Actor | null {
     if (!id) return null;
-    if (this.player.id === id) return this.player.dead ? null : this.player;
+    for (const p of this.players) if (p.id === id) return p.dead ? null : p;
     for (const a of this.allies) if (a.id === id) return a.state === 'morto' ? null : a;
+    for (const n of this.npcs) if (n.id === id) return n.state === 'morto' ? null : n;
     for (const z of this.zombies) if (z.id === id) return z;
     return null;
   }

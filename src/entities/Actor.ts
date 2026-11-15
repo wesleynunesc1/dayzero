@@ -41,8 +41,8 @@ export abstract class Actor {
   knockedDown = 0;
   look: Appearance;
 
-  constructor(prefix: string, x: number, y: number, look: Appearance) {
-    this.id = newId(prefix);
+  constructor(prefix: string, x: number, y: number, look: Appearance, fixedId?: string) {
+    this.id = fixedId ?? newId(prefix);
     this.x = x;
     this.y = y;
     this.look = look;

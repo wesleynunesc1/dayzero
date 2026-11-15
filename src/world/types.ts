@@ -49,6 +49,8 @@ export interface Container {
   inv: Inventory;
   searched: boolean;
   building: number;
+  /** Facção dona do recipiente (pegar sem permissão é roubo). */
+  owner?: string;
 }
 
 export interface Corpse {
@@ -123,6 +125,6 @@ export interface ZombieSpawn {
   x: number;
   y: number;
   type: 'comum' | 'rapido' | 'debilitado';
-  outfit?: 'policia' | 'mercado' | 'operario' | 'casual';
+  outfit?: 'policia' | 'mercado' | 'operario' | 'casual' | 'militar' | 'medico' | 'cientista';
   horde?: number;
 }

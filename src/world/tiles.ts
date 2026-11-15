@@ -30,6 +30,13 @@ export const T = {
   WALL_SAGE: 27,
   FLOOR_BATH: 28,
   WINDOW_BOARDED: 29,
+  WATER: 30,
+  ROCK: 31,
+  CROP: 32,
+  RUNWAY: 33,
+  BRIDGE: 34,
+  SAND: 35,
+  FLOOR_CLINIC: 36,
 } as const;
 
 export type TileId = number;
@@ -84,6 +91,13 @@ TILES[T.WALL_CONCRETE] = def('wall_concrete', WALL);
 TILES[T.WINDOW] = def('window', { solid: true, opaque: false, wall: true, sound: 2 });
 TILES[T.WINDOW_BROKEN] = def('window_broken', { solid: false, opaque: false, sound: 1, slow: 0.45, step: 'glass' });
 TILES[T.WINDOW_BOARDED] = def('window_boarded', { solid: true, opaque: true, wall: true, sound: 3 });
+TILES[T.WATER] = def('water', { solid: true, opaque: false, sound: 0.8 });
+TILES[T.ROCK] = def('rock', { solid: true, opaque: true, sound: 4 });
+TILES[T.CROP] = def('crop', { opaque: true, step: 'grass', slow: 0.75, sound: 1.3 });
+TILES[T.RUNWAY] = def('runway');
+TILES[T.BRIDGE] = def('bridge', { step: 'wood' });
+TILES[T.SAND] = def('sand', { step: 'grass' });
+TILES[T.FLOOR_CLINIC] = def('floor_clinic');
 TILES[T.FENCE_WOOD] = def('fence_wood', { solid: true, opaque: false, sound: 1.2, fence: true });
 TILES[T.FENCE_METAL] = def('fence_metal', { solid: true, opaque: false, sound: 1, fence: true });
 TILES[T.HEDGE] = def('hedge', { solid: true, opaque: true, sound: 1.6, fence: true, step: 'grass' });

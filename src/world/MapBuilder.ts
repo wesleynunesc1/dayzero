@@ -45,9 +45,14 @@ export interface BuiltWorld {
  * para garantir coerência: cada estabelecimento tem cômodos, portas, janelas
  * e recipientes em locais lógicos. Os itens aleatórios usam semente fixa.
  */
-export function buildNeighborhood(seed: number): BuiltWorld {
+/**
+ * `target`: mapa maior (mundo aberto) onde o bairro é construído nas mesmas coordenadas.
+ * Nesse caso as saídas leste e sul do bairro ficam abertas para o resto do mundo.
+ */
+export function buildNeighborhood(seed: number, target?: TileMap): BuiltWorld {
+  const open = !!target;
   const rng = new RNG(seed);
-  const map = new TileMap(MAP_W, MAP_H);
+  const map = target ?? new TileMap(MAP_W, MAP_H);
   const props: Prop[] = [];
   const containers = new Map<string, Container>();
   const containerAt = new Map<number, string>();
@@ -609,20 +614,22 @@ export function buildNeighborhood(seed: number): BuiltWorld {
   debris(0, 41, 1, 51);
   car(2, 43, true, { burned: true });
   car(2, 47, true);
-  debris(MAP_W - 2, 41, MAP_W - 1, 51);
+  if (!open) debris(MAP_W - 2, 41, MAP_W - 1, 51);
   car(118, 44, false, { kind: 'bus', burned: false, color: '#6e7357' });
   debris(116, 49, 117, 51);
   debris(57, 0, 67, 1);
   car(60, 2, false, { burned: true });
-  debris(57, MAP_H - 2, 67, MAP_H - 1);
-  car(61, 91, false, {});
+  if (!open) {
+    debris(57, MAP_H - 2, 67, MAP_H - 1);
+    car(61, 91, false, {});
+  }
   // barricada parcial na Rua do Comércio (passagem estreita à direita)
   debris(57, 70, 63, 71);
   car(58, 72, false, { burned: true });
   for (const [x, y] of [
     [57, 2],
     [67, 3],
-    [64, 92],
+    ...(open ? [] : [[64, 92]]),
   ])
     prop('debris', x, y, 1, 1, { name: 'Destroços', desc: 'Entulho e ferragens bloqueiam a passagem.' });
 
